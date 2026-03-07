@@ -4,6 +4,7 @@ import time
 import threading
 import base64
 import io
+import argparse
 from PIL import Image
 from IPython.display import display, HTML, update_display
 
@@ -117,7 +118,11 @@ class MonitorGambarKaggle:
 
 # === BLOK EKSEKUSI UTAMA ===
 if __name__ == "__main__":
-    folder_target = '/root/LoRA/output/sample' 
+    parser = argparse.ArgumentParser(description="Monitor folder untuk gambar terbaru.")
+    parser.add_argument("--target_folder", type=str, default="/root/LoRA/output/sample", help="Folder target yang akan dimonitor")
+    args = parser.parse_args()
+
+    folder_target = args.target_folder
     
     # Buat folder jika belum ada agar tidak error
     os.makedirs(folder_target, exist_ok=True)
