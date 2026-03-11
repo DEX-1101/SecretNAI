@@ -5,7 +5,7 @@ import base64
 import io
 import argparse
 from PIL import Image, UnidentifiedImageError
-from IPython.display import display, HTML, update_display
+from IPython.display import display, HTML, update_display, clear_output
 
 class MonitorGambarKaggle:
     def __init__(self, folder_path, max_images=20, kolom=4, interval_detik=5):
@@ -72,6 +72,12 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
     
     os.makedirs(args.target_folder, exist_ok=True)
-    monitor = MonitorGambarKaggle(args.target_folder, 16, 4, 10)
-    monitor.tampilkan_ui()
-    monitor.mulai_auto_refresh()
+    
+    # Hentikan thread lama jika cell di-rerun untuk elak penumpukan proses
+    if 'monitor_aktif' in globals():
+        monitor_aktif.hentikan_auto_refresh()
+        
+    clear_output(wait=True) # Bersihkan UI output sebelumnya
+    monitor_aktif = MonitorGambarKaggle(args.target_folder, 16, 4, 10)
+    monitor_aktif.tampilkan_ui()
+    monitor_aktif.mulai_auto_refresh()
