@@ -45,7 +45,7 @@ def get_info(url, headers):
             if "civitai" in url and "." not in fn: fn += ".safetensors"
             return fn, r.url
     except Exception as e:
-        print(f"\n❌ Failed to access link: {e}")
+        print(f"❌ Failed to access link: {e}")
         return None, None
 
 if not DOWNLOAD_BATCHES:
@@ -60,10 +60,10 @@ else:
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
                 
                 if os.path.exists(os.path.join(folder, repo_name)):
-                    print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
+                    print(f"⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
                     continue
                 
-                print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+                print(f"⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
                 
                 try:
                     p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
@@ -82,7 +82,7 @@ else:
             fn, furl = get_info(url, h)
             if not fn: continue
 
-            print(f"\n⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+            print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
             
             if "huggingface.co" in furl and HF_TOKEN:
@@ -101,6 +101,6 @@ else:
                 if p.returncode == 0:
                     print(f" [{COLOR_OK}OK{COLOR_RESET}]")
                 else:
-                    print(f"\n❌ Download failed (Aria2 Error Code: {p.returncode})\n")
+                    print(f"❌ Download failed (Aria2 Error Code: {p.returncode})")
             except Exception as e:
-                print(f"\n❌ System error occurred: {e}\n")
+                print(f"❌ System error occurred: {e}")
