@@ -34,13 +34,14 @@ for line in user_ns.get('DOWNLOAD_LIST', '').splitlines():
     else:
         current_dir = line
 
+# Fallback if still using the old dictionary format
 if not DOWNLOAD_BATCHES:
     DOWNLOAD_BATCHES = user_ns.get('DOWNLOAD_BATCHES', {})
 
 def get_info(url, headers):
     try:
         with requests.get(url, headers=headers, stream=True, timeout=15) as r:
-            r.raise_for_status()
+            r.raise_for_status() # Triggers error if HTTP status is not 200 (e.g., 404 Not Found / 401 Unauthorized)
             m = re.search('filename="?([^"]+)"?', r.headers.get("Content-Disposition", ""))
             fn = m.group(1) if m else url.split("/")[-1]
             if "civitai" in url and "." not in fn: fn += ".safetensors"
@@ -64,18 +65,27 @@ else:
             fn, furl = get_info(url, h)
             if not fn: continue
 
+            # Updated print format: Downloading: filename > /target/folder
             print(f"\n⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
-            if auth: cmd.append(f"--header=Authorization: {auth}")
+            
+            # FIX Error 22: Jangan kirim API key ke CDN / Signed URLs setelah redirect
+            if "huggingface.co" in furl and HF_TOKEN:
+                cmd.append(f"--header=Authorization: Bearer {HF_TOKEN}")
+            elif "civitai.com" in furl and CIVITAI_TOKEN:
+                cmd.append(f"--header=Authorization: Bearer {CIVITAI_TOKEN}")
+                
             cmd.append(furl)
             
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 for line in p.stdout:
+                    # Adjusted padding to 73 so [OK] isn't pushed too far to the right
                     if line.startswith("[#"): print(f"\r{line.strip():<20}", end="", flush=True)
                 p.wait()
                 
                 if p.returncode == 0:
+                    # Append [OK] directly to the end of the progress bar line
                     print(f" [{COLOR_OK}OK{COLOR_RESET}]")
                 else:
                     print(f"\n❌ Download failed (Aria2 Error Code: {p.returncode})\n")
