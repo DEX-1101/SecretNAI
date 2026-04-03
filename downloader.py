@@ -63,7 +63,7 @@ else:
                     print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
                     continue
                 
-                print(f"⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+                print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
                 
                 try:
                     p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
