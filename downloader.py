@@ -1,10 +1,9 @@
 import os, subprocess, requests, re, argparse
 
-# ANSI color codes for terminal output
-COLOR_FN = '\033[96m'  # Cyan for filename
-COLOR_OK = '\033[92m'  # Green for OK
-COLOR_DIR = '\033[93m' # Yellow for directory
-COLOR_RESET = '\033[0m' # Reset color
+COLOR_FN = '\033[96m'
+COLOR_OK = '\033[92m'
+COLOR_DIR = '\033[93m'
+COLOR_RESET = '\033[0m'
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="")
@@ -34,14 +33,13 @@ for line in user_ns.get('DOWNLOAD_LIST', '').splitlines():
     else:
         current_dir = line
 
-# Fallback if still using the old dictionary format
 if not DOWNLOAD_BATCHES:
     DOWNLOAD_BATCHES = user_ns.get('DOWNLOAD_BATCHES', {})
 
 def get_info(url, headers):
     try:
         with requests.get(url, headers=headers, stream=True, timeout=15) as r:
-            r.raise_for_status() # Triggers error if HTTP status is not 200 (e.g., 404 Not Found / 401 Unauthorized)
+            r.raise_for_status()
             m = re.search('filename="?([^"]+)"?', r.headers.get("Content-Disposition", ""))
             fn = m.group(1) if m else url.split("/")[-1]
             if "civitai" in url and "." not in fn: fn += ".safetensors"
@@ -58,6 +56,30 @@ else:
         os.makedirs(folder, exist_ok=True)
         
         for url in links:
+            if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
+                repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
+                print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+                
+                if os.path.exists(os.path.join(folder, repo_name)):
+                    msg = f"Repo '{repo_name}' already exists."
+                    print(f"\r{msg:<20} [{COLOR_OK}SKIP{COLOR_RESET}]")
+                    continue
+                
+                msg = f"Cloning into '{repo_name}'..."
+                print(f"\r{msg:<20}", end="", flush=True)
+                
+                try:
+                    p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
+                    if p.returncode == 0:
+                        print(f" [{COLOR_OK}OK{COLOR_RESET}]")
+                    else:
+                        err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
+                        print(f"\n❌ Clone failed: {err}\n")
+                except Exception as e:
+                    print(f"\n❌ System error occurred: {e}\n")
+                
+                continue
+
             auth = f"Bearer {HF_TOKEN}" if "huggingface" in url and HF_TOKEN else f"Bearer {CIVITAI_TOKEN}" if "civitai" in url and CIVITAI_TOKEN else ""
             h = {"User-Agent": "Mozilla/5.0"}
             if auth: h["Authorization"] = auth
@@ -65,11 +87,9 @@ else:
             fn, furl = get_info(url, h)
             if not fn: continue
 
-            # Updated print format: Downloading: filename > /target/folder
             print(f"\n⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
             
-            # FIX Error 22: Jangan kirim API key ke CDN / Signed URLs setelah redirect
             if "huggingface.co" in furl and HF_TOKEN:
                 cmd.append(f"--header=Authorization: Bearer {HF_TOKEN}")
             elif "civitai.com" in furl and CIVITAI_TOKEN:
@@ -80,12 +100,10 @@ else:
             try:
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 for line in p.stdout:
-                    # Adjusted padding to 73 so [OK] isn't pushed too far to the right
                     if line.startswith("[#"): print(f"\r{line.strip():<20}", end="", flush=True)
                 p.wait()
                 
                 if p.returncode == 0:
-                    # Append [OK] directly to the end of the progress bar line
                     print(f" [{COLOR_OK}OK{COLOR_RESET}]")
                 else:
                     print(f"\n❌ Download failed (Aria2 Error Code: {p.returncode})\n")
