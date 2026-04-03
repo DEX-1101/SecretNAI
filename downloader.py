@@ -58,25 +58,20 @@ else:
         for url in links:
             if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
-                print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
                 
                 if os.path.exists(os.path.join(folder, repo_name)):
-                    msg = f"Repo '{repo_name}' already exists."
-                    print(f"\r{msg:<20} [{COLOR_OK}SKIP{COLOR_RESET}]")
+                    print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
                     continue
                 
-                msg = f"Cloning into '{repo_name}'..."
-                print(f"\r{msg:<20}", end="", flush=True)
+                print(f"\n⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
                 
                 try:
                     p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
-                    if p.returncode == 0:
-                        print(f" [{COLOR_OK}OK{COLOR_RESET}]")
-                    else:
+                    if p.returncode != 0:
                         err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
-                        print(f"\n❌ Clone failed: {err}\n")
+                        print(f"❌ Clone failed: {err}")
                 except Exception as e:
-                    print(f"\n❌ System error occurred: {e}\n")
+                    print(f"❌ System error occurred: {e}")
                 
                 continue
 
