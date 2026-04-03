@@ -60,7 +60,7 @@ else:
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
                 
                 if os.path.exists(os.path.join(folder, repo_name)):
-                    print(f"⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
+                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
                     continue
                 
                 print(f"⬇️ Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
