@@ -1,4 +1,5 @@
 import os, subprocess, requests, re, argparse
+from collections import defaultdict
 
 COLOR_FN = '\033[96m'
 COLOR_OK = '\033[92m'
@@ -19,22 +20,32 @@ except:
 HF_TOKEN = args.hf
 CIVITAI_TOKEN = args.civitai
 
-DOWNLOAD_BATCHES = {}
+VAR_REGEX = re.compile(r'\{([^}]+)\}')
+
+def resolve_vars(text):
+    return VAR_REGEX.sub(lambda m: str(user_ns.get(m.group(1), m.group(0))), text)
+
+DOWNLOAD_BATCHES = defaultdict(list)
 current_dir = "downloads"
+raw_list = user_ns.get('DOWNLOAD_LIST', '')
 
-for line in user_ns.get('DOWNLOAD_LIST', '').splitlines():
-    line = line.strip()
-    if not line or line.startswith('#'):
-        continue
+if raw_list:
+    for line in raw_list.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
 
-    if line.startswith('http'):
-        os.makedirs(current_dir, exist_ok=True)
-        DOWNLOAD_BATCHES.setdefault(current_dir, []).append(line)
-    else:
-        current_dir = line
+        line = resolve_vars(line)
 
-if not DOWNLOAD_BATCHES:
-    DOWNLOAD_BATCHES = user_ns.get('DOWNLOAD_BATCHES', {})
+        if line.startswith('http'):
+            DOWNLOAD_BATCHES[current_dir].append(line)
+        else:
+            current_dir = line
+else:
+    raw_batches = user_ns.get('DOWNLOAD_BATCHES', {})
+    for k, v in raw_batches.items():
+        k_res = resolve_vars(k)
+        DOWNLOAD_BATCHES[k_res] = [resolve_vars(url) for url in v]
 
 def get_info(url, headers):
     try:
@@ -53,6 +64,7 @@ if not DOWNLOAD_BATCHES:
 else:
     for folder, links in DOWNLOAD_BATCHES.items():
         if not links: continue
+        
         os.makedirs(folder, exist_ok=True)
         
         for url in links:
