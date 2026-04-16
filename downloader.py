@@ -89,14 +89,12 @@ else:
                     except Exception as e:
                         print(f"❌ System error occurred: {e}")
                 
-                # Check for requirements.txt if --req is passed and repo exists/cloned
                 if args.req and clone_success:
                     req_file = os.path.join(repo_path, "requirements.txt")
                     if os.path.exists(req_file):
                         print(f"📦 Installing requirements for: {COLOR_FN}{repo_name}{COLOR_RESET}")
                         try:
-                            # Using uv pip install as requested
-                            req_p = subprocess.run(["uv", "pip", "install", "-r", "requirements.txt"], cwd=repo_path)
+                            req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path)
                             if req_p.returncode == 0:
                                 print(f" [{COLOR_OK}REQ OK{COLOR_RESET}]")
                             else:
