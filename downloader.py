@@ -101,18 +101,17 @@ else:
                         print(f"[{COLOR_ERR}requirements.txt is empty{COLOR_RESET}]")
                     else:
                         try:
-                            # Added --system and captured output to hide verbose logs
                             req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
                             if req_p.returncode == 0:
                                 print(f"[{COLOR_OK}OK{COLOR_RESET}]")
                             else:
-                                # Grab the last line of the error output to show what went wrong
                                 err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
                                 err_msg = err_lines[-1] if err_lines else "Unknown install error"
                                 print(f"[{COLOR_ERR}Failed: {err_msg}{COLOR_RESET}]")
                         except Exception as e:
                             print(f"[{COLOR_ERR}System error: {e}{COLOR_RESET}]")
                 
+                print()
                 continue
 
             auth = f"Bearer {HF_TOKEN}" if "huggingface" in url and HF_TOKEN else f"Bearer {CIVITAI_TOKEN}" if "civitai" in url and CIVITAI_TOKEN else ""
@@ -144,3 +143,5 @@ else:
                     print(f"❌ Download failed (Aria2 Error Code: {p.returncode})")
             except Exception as e:
                 print(f"❌ System error occurred: {e}")
+                
+            print()
