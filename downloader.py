@@ -4,6 +4,7 @@ from collections import defaultdict
 COLOR_FN = '\033[96m'
 COLOR_OK = '\033[92m'
 COLOR_DIR = '\033[93m'
+COLOR_ERR = '\033[91m'
 COLOR_RESET = '\033[0m'
 
 parser = argparse.ArgumentParser()
@@ -89,18 +90,28 @@ else:
                     except Exception as e:
                         print(f"❌ System error occurred: {e}")
                 
+                # Check for requirements.txt if --req is passed and repo exists/cloned
                 if args.req and clone_success:
+                    print(f"📦 Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
-                    if os.path.exists(req_file):
-                        print(f"📦 Installing requirements for: {COLOR_FN}{repo_name}{COLOR_RESET}")
+                    
+                    if not os.path.exists(req_file):
+                        print(f"[{COLOR_ERR}No requirements.txt found{COLOR_RESET}]")
+                    elif os.path.getsize(req_file) == 0:
+                        print(f"[{COLOR_ERR}requirements.txt is empty{COLOR_RESET}]")
+                    else:
                         try:
-                            req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path)
+                            # Added --system and captured output to hide verbose logs
+                            req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
                             if req_p.returncode == 0:
-                                print(f" [{COLOR_OK}REQ OK{COLOR_RESET}]")
+                                print(f"[{COLOR_OK}OK{COLOR_RESET}]")
                             else:
-                                print(f"❌ Requirements installation failed for {repo_name}")
+                                # Grab the last line of the error output to show what went wrong
+                                err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
+                                err_msg = err_lines[-1] if err_lines else "Unknown install error"
+                                print(f"[{COLOR_ERR}Failed: {err_msg}{COLOR_RESET}]")
                         except Exception as e:
-                            print(f"❌ System error occurred during pip install: {e}")
+                            print(f"[{COLOR_ERR}System error: {e}{COLOR_RESET}]")
                 
                 continue
 
