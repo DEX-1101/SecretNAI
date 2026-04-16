@@ -9,6 +9,7 @@ COLOR_RESET = '\033[0m'
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="")
 parser.add_argument("--civitai", default="")
+parser.add_argument("--req", action="store_true", help="Automatically run uv pip install on requirements.txt in cloned repos")
 args, _ = parser.parse_known_args()
 
 try:
@@ -70,20 +71,38 @@ else:
         for url in links:
             if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
+                repo_path = os.path.join(folder, repo_name)
+                clone_success = False
                 
-                if os.path.exists(os.path.join(folder, repo_name)):
+                if os.path.exists(repo_path):
                     print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
-                    continue
+                    clone_success = True
+                else:
+                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+                    try:
+                        p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
+                        if p.returncode != 0:
+                            err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
+                            print(f"❌ Clone failed: {err}")
+                        else:
+                            clone_success = True
+                    except Exception as e:
+                        print(f"❌ System error occurred: {e}")
                 
-                print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
-                
-                try:
-                    p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
-                    if p.returncode != 0:
-                        err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
-                        print(f"❌ Clone failed: {err}")
-                except Exception as e:
-                    print(f"❌ System error occurred: {e}")
+                # Check for requirements.txt if --req is passed and repo exists/cloned
+                if args.req and clone_success:
+                    req_file = os.path.join(repo_path, "requirements.txt")
+                    if os.path.exists(req_file):
+                        print(f"📦 Installing requirements for: {COLOR_FN}{repo_name}{COLOR_RESET}")
+                        try:
+                            # Using uv pip install as requested
+                            req_p = subprocess.run(["uv", "pip", "install", "-r", "requirements.txt"], cwd=repo_path)
+                            if req_p.returncode == 0:
+                                print(f" [{COLOR_OK}REQ OK{COLOR_RESET}]")
+                            else:
+                                print(f"❌ Requirements installation failed for {repo_name}")
+                        except Exception as e:
+                            print(f"❌ System error occurred during pip install: {e}")
                 
                 continue
 
