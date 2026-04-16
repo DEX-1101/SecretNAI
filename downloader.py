@@ -1,4 +1,4 @@
-import os, subprocess, requests, re, argparse
+import os, subprocess, requests, re, argparse, shutil
 from collections import defaultdict
 
 COLOR_FN = '\033[96m'
@@ -8,9 +8,9 @@ COLOR_ERR = '\033[91m'
 COLOR_RESET = '\033[0m'
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--hf", default="")
-parser.add_argument("--civitai", default="")
-parser.add_argument("--req", action="store_true", help="Automatically run uv pip install on requirements.txt in cloned repos")
+parser.add_argument("--hf", default="", help="HuggingFace API token")
+parser.add_argument("--civitai", default="", help="Civitai API token")
+parser.add_argument("--req", action="store_true", help="Install requirements.txt in cloned repos")
 args, _ = parser.parse_known_args()
 
 try:
@@ -69,6 +69,20 @@ def get_info(url, headers):
 if not DOWNLOAD_BATCHES:
     print("❌ DOWNLOAD_LIST not found. Declare a text (string) variable in the Colab cell before running %run.")
 else:
+    if not shutil.which("aria2c"):
+        print("⚙️ Installing aria2c... ", end="", flush=True)
+        cmds = [
+            "sudo apt-get update && sudo apt-get install -qq -y aria2",
+            "apt-get update && apt-get install -qq -y aria2"
+        ]
+        for cmd in cmds:
+            try:
+                subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if shutil.which("aria2c"): 
+                    print("\r\033[K", end="", flush=True)
+                    break
+            except: pass
+
     for folder, links in DOWNLOAD_BATCHES.items():
         if not links: continue
         
