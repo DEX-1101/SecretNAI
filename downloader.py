@@ -53,8 +53,13 @@ def get_info(url, headers):
     try:
         with requests.get(url, headers=headers, stream=True, timeout=15) as r:
             r.raise_for_status()
-            m = re.search('filename="?([^"]+)"?', r.headers.get("Content-Disposition", ""))
-            fn = m.group(1) if m else url.split("/")[-1]
+            
+            if "/login" in r.url:
+                print(f"❌ Authentication failed: Redirected to login page. Please check your Civitai API token.")
+                return None, None
+                
+            m = re.search('filename="?([^";]+)"?', r.headers.get("Content-Disposition", ""))
+            fn = m.group(1) if m else r.url.split("/")[-1].split("?")[0]
             if "civitai" in url and "." not in fn: fn += ".safetensors"
             return fn, r.url
     except Exception as e:
@@ -90,7 +95,6 @@ else:
                     except Exception as e:
                         print(f"❌ System error occurred: {e}")
                 
-                # Check for requirements.txt if --req is passed and repo exists/cloned
                 if args.req and clone_success:
                     print(f"📦 Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
@@ -114,7 +118,10 @@ else:
                 print()
                 continue
 
-            auth = f"Bearer {HF_TOKEN}" if "huggingface" in url and HF_TOKEN else f"Bearer {CIVITAI_TOKEN}" if "civitai" in url and CIVITAI_TOKEN else ""
+            if "civitai" in url and CIVITAI_TOKEN and "token=" not in url:
+                url += f"{'&' if '?' in url else '?'}token={CIVITAI_TOKEN}"
+
+            auth = f"Bearer {HF_TOKEN}" if "huggingface" in url and HF_TOKEN else ""
             h = {"User-Agent": "Mozilla/5.0"}
             if auth: h["Authorization"] = auth
             
@@ -124,10 +131,9 @@ else:
             print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
             
-            if "huggingface.co" in furl and HF_TOKEN:
-                cmd.append(f"--header=Authorization: Bearer {HF_TOKEN}")
-            elif "civitai.com" in furl and CIVITAI_TOKEN:
-                cmd.append(f"--header=Authorization: Bearer {CIVITAI_TOKEN}")
+            if furl == url:
+                if "huggingface.co" in furl and HF_TOKEN:
+                    cmd.append(f"--header=Authorization: Bearer {HF_TOKEN}")
                 
             cmd.append(furl)
             
