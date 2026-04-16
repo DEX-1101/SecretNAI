@@ -20,6 +20,9 @@ class MonitorGambarKaggle:
         self._thread = None
         self.display_id = f"monitor_{int(time.time())}"
         
+        # Pemanasan psutil CPU percent agar tidak mengembalikan 0.0 di panggilan pertama
+        psutil.cpu_percent()
+        
         # Cache untuk optimasi (gambar tidak perlu di-load tiap detik)
         self._cached_img_html = ""
         self._last_img_update = 0
@@ -84,16 +87,20 @@ class MonitorGambarKaggle:
                 gpus = result.strip().split('\n')
                 if gpus:
                     gpu_util, vram_used, vram_total = gpus[0].split(', ')
-                    self._cached_gpu_info = f"GPU: {gpu_util}% | VRAM: {vram_used}/{vram_total} MB"
+                    try:
+                        vram_pct = (float(vram_used) / float(vram_total)) * 100
+                    except:
+                        vram_pct = 0.0
+                    self._cached_gpu_info = f"GPU: {gpu_util}% | VRAM: {vram_used}/{vram_total}MB ({vram_pct:.1f}%)"
             except Exception:
                 pass # Jika gagal/timeout, gunakan cache GPU yang terakhir berhasil
             self._last_gpu_update = current_time
             
         stats_html = f"""
-        <div style="font-size:12px; color:#a0a0a0; background:#1a1a1a; padding:10px; border-radius:4px; margin-bottom:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; font-family:monospace; border:1px solid #333;">
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
             <span><b style="color:#fff;">CPU:</b> {cpu}%</span>
-            <span><b style="color:#fff;">RAM:</b> {ram_used_gb:.1f}/{ram_total_gb:.1f} GB ({ram_percent}%)</span>
-            <span><b style="color:#fff;">Disk:</b> {disk_used_gb:.1f}/{disk_total_gb:.1f} GB ({disk_percent:.1f}%)</span>
+            <span><b style="color:#fff;">RAM:</b> {ram_used_gb:.1f}GB ({ram_percent}%)</span>
+            <span><b style="color:#fff;">Disk:</b> {disk_percent:.1f}%</span>
             <span style="color:#4CAF50;"><b>{self._cached_gpu_info}</b></span>
         </div>
         """
@@ -138,11 +145,20 @@ class MonitorGambarKaggle:
         
         # Header UI
         html = f'<div style="background:#0e0e0e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:sans-serif;border:1px solid #2d2d2d;">'
-        html += f'<div style="font-size:11px;color:#858585;margin-bottom:12px;display:flex;justify-content:space-between;">'
-        html += f'<span><span style="color:#4CAF50;">●</span> <b>Live</b> | {time.strftime("%H:%M:%S")}</span>'
-        html += f'<span style="font-family:monospace;">{self._last_files_count} img | {self.folder_path}</span></div>'
         
-        return html + sys_html + self._cached_img_html + '</div>'
+        # Top Bar (Live + Info Folder + Stats Hardware)
+        html += f'<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">'
+        html += f'<div style="font-size:12px; white-space:nowrap;">'
+        html += f'<span style="color:#4CAF50;">●</span> <b>Live</b> <span style="color:#555; margin:0 6px;">|</span> {time.strftime("%H:%M:%S")} '
+        html += f'<span style="color:#555; margin:0 6px;">|</span> <span style="color:#858585; font-family:monospace;">{self._last_files_count} img : {self.folder_path}</span>'
+        html += f'</div>'
+        html += f'<div style="font-size:11px; font-family:monospace; color:#a0a0a0; margin:0;">{sys_html}</div>'
+        html += f'</div>'
+        
+        # Garis pemisah (Line Separator)
+        html += f'<hr style="border:none; border-top:1px solid #2d2d2d; margin:10px 0 12px 0;" />'
+        
+        return html + self._cached_img_html + '</div>'
 
     def tampilkan_ui(self):
         display(HTML(self.generate_html(force_img_update=True)), display_id=self.display_id)
