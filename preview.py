@@ -31,7 +31,6 @@ class MonitorGambarKaggle:
         self._last_gpu_update = 0
 
     def ambil_file_terbaru(self):
-    def ambil_file_terbaru(self):
         if not os.path.exists(self.folder_path): return [], []
         valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif')
         file_list = []
@@ -100,7 +99,6 @@ class MonitorGambarKaggle:
         """
         return stats_html
 
-    def generate_img_html(self):
     def generate_img_html(self):
         files, current_state = self.ambil_file_terbaru()
         self._last_files_count = len(files)
