@@ -95,7 +95,7 @@ else:
                 clone_success = False
                 
                 if os.path.exists(repo_path):
-                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET} [{COLOR_OK}SKIP{COLOR_RESET}]")
+                    print(f"💀 {COLOR_FN}{repo_name}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
                     clone_success = True
                 else:
                     print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
@@ -110,7 +110,7 @@ else:
                         print(f"❌ System error occurred: {e}")
                 
                 if args.req and clone_success:
-                    print(f"📦 Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
+                    print(f"♿ Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
                     
                     if not os.path.exists(req_file):
@@ -141,6 +141,11 @@ else:
             
             fn, furl = get_info(url, h)
             if not fn: continue
+
+            file_path = os.path.join(folder, fn)
+            if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
+                print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}\n")
+                continue
 
             print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
