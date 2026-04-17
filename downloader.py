@@ -12,6 +12,7 @@ parser.add_argument("--hf", default="", help="HuggingFace API token")
 parser.add_argument("--civitai", default="", help="Civitai API token")
 parser.add_argument("--req", action="store_true", help="Install requirements.txt in cloned repos")
 parser.add_argument("--zip", default="", help="Password for extracting ZIP files")
+parser.add_argument("--upload_to", default="", help="Upload folder to HF: username/repo::[remote_folder]::local_folder or username/repo::local_folder")
 args, _ = parser.parse_known_args()
 
 try:
@@ -102,11 +103,65 @@ def extract_zip(file_path, folder, pwd):
             if skipped > 0:
                 ext_summary += f" | {COLOR_ERR}{skipped} skipped{COLOR_RESET}"
                 
-            print(f"\rExtracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} [ {ext_summary} ]\033[K")
+            print(f"\r🗡️ Extracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} [ {ext_summary} ]\033[K")
     except Exception as e:
         print(f"\n❌ Error extracting {os.path.basename(file_path)}: {e}")
 
-if not DOWNLOAD_BATCHES:
+def run_upload():
+    parts = args.upload_to.split("::")
+    if len(parts) == 2:
+        repo_id, local_folder = parts
+        remote_folder = ""
+    elif len(parts) == 3:
+        repo_id, remote_folder, local_folder = parts
+    else:
+        print(f"❌ Invalid format. Use: {COLOR_FN}username/repo::[remote_folder]::local_folder{COLOR_RESET} or {COLOR_FN}username/repo::local_folder{COLOR_RESET}")
+        return
+        
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        print(f"⚙️ Installing {COLOR_OK}huggingface_hub{COLOR_RESET}... ", end="", flush=True)
+        subprocess.run("pip install -q huggingface_hub", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from huggingface_hub import HfApi
+        print("\r\033[K", end="")
+        
+    if not HF_TOKEN:
+        print(f"❌ HF Token is required for uploading! Pass it via {COLOR_FN}--hf{COLOR_RESET}")
+        return
+    if not os.path.exists(local_folder):
+        print(f"❌ Local folder {COLOR_DIR}{local_folder}{COLOR_RESET} does not exist!")
+        return
+
+    api = HfApi(token=HF_TOKEN)
+    
+    try:
+        api.model_info(repo_id)
+    except:
+        print(f"⚙️ Creating private repo {COLOR_FN}{repo_id}{COLOR_RESET}... ", end="", flush=True)
+        try:
+            api.create_repo(repo_id=repo_id, private=True, exist_ok=True)
+            print(f"[{COLOR_OK}OK{COLOR_RESET}]")
+        except Exception as e:
+            print(f"\n❌ Failed to create repo: {e}")
+            return
+
+    print(f"💦 Uploading to {COLOR_FN}{repo_id}/{remote_folder if remote_folder else 'root'}{COLOR_RESET}...")
+    
+    try:
+        api.upload_folder(
+            folder_path=local_folder,
+            path_in_repo=remote_folder,
+            repo_id=repo_id,
+            repo_type="model"
+        )
+        print(f"✅ Upload {COLOR_OK}Done{COLOR_RESET}!")
+    except Exception as e:
+        print(f"\n❌ Error during upload: {e}")
+
+if args.upload_to:
+    run_upload()
+elif not DOWNLOAD_BATCHES:
     print("❌ DOWNLOAD_LIST not found. Declare a text (string) variable in the Colab cell before running %run.")
 else:
     if not shutil.which("aria2c"):
