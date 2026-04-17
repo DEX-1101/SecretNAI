@@ -77,11 +77,32 @@ def extract_zip(file_path, folder, pwd):
             total = len(infos)
             if total == 0:
                 return
+            
+            ext_counts = defaultdict(int)
+            skipped = 0
+            
             for i, info in enumerate(infos, 1):
                 fname = info.filename if len(info.filename) < 60 else info.filename[:57] + '...'
-                print(f"\r🗡️ Extracting [{i}/{total}]: {COLOR_FN}{fname}{COLOR_RESET}\033[K", end="", flush=True)
+                print(f"\rExtracting [{i}/{total}]: {COLOR_FN}{fname}{COLOR_RESET}\033[K", end="", flush=True)
+                
+                target_path = os.path.join(folder, info.filename)
+                
+                if not info.is_dir():
+                    ext = os.path.splitext(info.filename)[1].lower() or 'no-ext'
+                    ext_counts[ext] += 1
+                    
+                    if os.path.exists(target_path):
+                        skipped += 1
+                        continue
+                
                 z.extract(info, folder)
-            print(f"\r🗡️ Extracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} ({COLOR_FN}{os.path.basename(file_path)}{COLOR_RESET})\033[K")
+                
+            count_strs = [f"{COLOR_FN}{ext.lstrip('.')}{COLOR_RESET} ({COLOR_OK}{count}{COLOR_RESET})" for ext, count in ext_counts.items()]
+            ext_summary = ", ".join(count_strs)
+            if skipped > 0:
+                ext_summary += f" | {COLOR_ERR}{skipped} skipped{COLOR_RESET}"
+                
+            print(f"\rExtracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} [ {ext_summary} ]\033[K")
     except Exception as e:
         print(f"\n❌ Error extracting {os.path.basename(file_path)}: {e}")
 
@@ -89,7 +110,7 @@ if not DOWNLOAD_BATCHES:
     print("❌ DOWNLOAD_LIST not found. Declare a text (string) variable in the Colab cell before running %run.")
 else:
     if not shutil.which("aria2c"):
-        print("⚙️ Installing aria2c... ", end="", flush=True)
+        print(f"⚙️ Installing {COLOR_OK}aria2c{COLOR_RESET}... ", end="", flush=True)
         try:
             subprocess.run("apt-get install -y -qq aria2", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if shutil.which("aria2c"): 
@@ -111,19 +132,20 @@ else:
                     print(f"💀 {COLOR_FN}{repo_name}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
                     clone_success = True
                 else:
-                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET}", end="", flush=True)
                     try:
                         p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
                         if p.returncode != 0:
                             err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
-                            print(f"❌ Clone failed: {err}")
+                            print(f"\n❌ Clone failed: {err}")
                         else:
+                            print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
                             clone_success = True
                     except Exception as e:
-                        print(f"❌ System error occurred: {e}")
+                        print(f"\n❌ System error occurred: {e}")
                 
                 if args.req and clone_success:
-                    print(f"♿ Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
+                    print(f"Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
                     
                     if not os.path.exists(req_file):
@@ -164,7 +186,7 @@ else:
                 print()
                 continue
 
-            print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
+            print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET}")
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
             
             if furl == url:
@@ -180,7 +202,7 @@ else:
                 p.wait()
                 
                 if p.returncode == 0:
-                    print(f" [{COLOR_OK}OK{COLOR_RESET}]")
+                    print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
                     if fn.lower().endswith('.zip'):
                         extract_zip(file_path, folder, args.zip)
                 else:
