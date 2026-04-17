@@ -1,4 +1,4 @@
-import os, subprocess, requests, re, argparse, shutil
+import os, subprocess, requests, re, argparse, shutil, zipfile
 from collections import defaultdict
 
 COLOR_FN = '\033[96m'
@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="", help="HuggingFace API token")
 parser.add_argument("--civitai", default="", help="Civitai API token")
 parser.add_argument("--req", action="store_true", help="Install requirements.txt in cloned repos")
+parser.add_argument("--zip", default="", help="Password for extracting ZIP files")
 args, _ = parser.parse_known_args()
 
 try:
@@ -66,22 +67,34 @@ def get_info(url, headers):
         print(f"❌ Failed to access link: {e}")
         return None, None
 
+def extract_zip(file_path, folder, pwd):
+    if not file_path.lower().endswith('.zip'): return
+    try:
+        with zipfile.ZipFile(file_path, 'r') as z:
+            if pwd:
+                z.setpassword(pwd.encode('utf-8'))
+            infos = z.infolist()
+            total = len(infos)
+            if total == 0:
+                return
+            for i, info in enumerate(infos, 1):
+                fname = info.filename if len(info.filename) < 60 else info.filename[:57] + '...'
+                print(f"\r🗡️ Extracting [{i}/{total}]: {COLOR_FN}{fname}{COLOR_RESET}\033[K", end="", flush=True)
+                z.extract(info, folder)
+            print(f"\r🗡️ Extracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} ({COLOR_FN}{os.path.basename(file_path)}{COLOR_RESET})\033[K")
+    except Exception as e:
+        print(f"\n❌ Error extracting {os.path.basename(file_path)}: {e}")
+
 if not DOWNLOAD_BATCHES:
     print("❌ DOWNLOAD_LIST not found. Declare a text (string) variable in the Colab cell before running %run.")
 else:
     if not shutil.which("aria2c"):
         print("⚙️ Installing aria2c... ", end="", flush=True)
-        cmds = [
-            "sudo apt-get update && sudo apt-get install -qq -y aria2",
-            "apt-get update && apt-get install -qq -y aria2"
-        ]
-        for cmd in cmds:
-            try:
-                subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if shutil.which("aria2c"): 
-                    print("\r\033[K", end="", flush=True)
-                    break
-            except: pass
+        try:
+            subprocess.run("apt-get install -y -qq aria2", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if shutil.which("aria2c"): 
+                print("\r\033[K", end="", flush=True)
+        except: pass
 
     for folder, links in DOWNLOAD_BATCHES.items():
         if not links: continue
@@ -143,8 +156,12 @@ else:
             if not fn: continue
 
             file_path = os.path.join(folder, fn)
+            # Skip if the file exists and there's no active .aria2 active download file
             if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
-                print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}\n")
+                print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
+                if fn.lower().endswith('.zip'):
+                    extract_zip(file_path, folder, args.zip)
+                print()
                 continue
 
             print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET} > {COLOR_DIR}{folder}{COLOR_RESET}")
@@ -164,6 +181,8 @@ else:
                 
                 if p.returncode == 0:
                     print(f" [{COLOR_OK}OK{COLOR_RESET}]")
+                    if fn.lower().endswith('.zip'):
+                        extract_zip(file_path, folder, args.zip)
                 else:
                     print(f"❌ Download failed (Aria2 Error Code: {p.returncode})")
             except Exception as e:
