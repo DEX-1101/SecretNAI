@@ -1,0 +1,259 @@
+/* Windows 11 Dark Theme Colors */
+:root, .dark {
+  --body-background-fill: #111111;
+  --background-fill-primary: #1e1e1e;
+  --background-fill-secondary: #252525;
+  --border-color-primary: #333333;
+  --button-primary-background-fill: #2d2d2d;
+  --button-primary-background-fill-hover: #3a3a3a;
+  --button-secondary-background-fill: #2d2d2d;
+  --button-secondary-background-fill-hover: #3a3a3a;
+  --input-background-fill: #1a1a1a;
+  --win11-accent: #60cdff;
+  --win11-accent-hover: #4ab5e8;
+}
+
+/* Force Sharp Corners Globally */
+button, input, textarea, select, .card, .panel, .block, .wrap, .box, .gradio-container {
+  border-radius: 0 !important;
+}
+
+/* Base Layout Constraints */
+#txt2img_gallery, #img2img_gallery {
+  height: 680px;
+}
+
+#txt2img_results, #img2img_results {
+  min-width: 50%;
+}
+
+#txt2img_gallery > .grid-wrap, #txt2img_gallery > .preview,
+#img2img_gallery > .grid-wrap, #img2img_gallery > .preview {
+  max-height: none;
+}
+
+#txt2img_extra_networks:not(div), #img2img_extra_networks:not(div) {
+  order: 1 !important;
+}
+
+#setting_show_progress_every_n_steps > div.wrap > div > label > span {
+  white-space: nowrap;
+  overflow: hidden;
+  width: 220px;
+  text-overflow: ellipsis;
+}
+
+/* Mobile Responsiveness */
+@media screen and (min-width: 420px) {
+  #sampler_selection_txt2img, #sampler_selection_img2img {
+    flex-direction: row;
+  }
+}
+
+@media screen and (max-width: 420px) {
+  #sampler_selection_txt2img, #sampler_selection_img2img {
+    flex-direction: column;
+  }
+}
+
+/* Spacing and Padding */
+#txt2img_script_container > * .block.padded, #img2img_script_container > * .block.padded {
+  padding: 10px !important;
+  background-color: var(--background-fill-primary) !important;
+  border: 1px solid var(--border-color-primary) !important;
+}
+
+div.compact {
+  gap: 5px !important;
+}
+
+.tab-nav.scroll-hide.svelte-1g805jl {
+  row-gap: 5px !important;
+}
+
+#txt2img_script_container > div, #img2img_script_container > div {
+  margin-bottom: 10px;
+}
+
+.gradio-container {
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+/* Modern Tab Styling (Win 11 Style Accent Underline) */
+#tabs > .tab-nav > button,
+#txt2img_extra_tabs > .tab-nav > button,
+#img2img_extra_tabs > .tab-nav > button,
+#mode_img2img > .tab-nav > button {
+  border: none !important;
+  background: transparent !important;
+  border-bottom: 2px solid transparent !important;
+  transition: all 0.2s ease;
+}
+
+#tabs > .tab-nav > button.selected,
+#txt2img_extra_tabs > .tab-nav > button.selected,
+#img2img_extra_tabs > .tab-nav > button.selected,
+#mode_img2img > .tab-nav > button.selected {
+  color: var(--win11-accent) !important;
+  border-bottom: 2px solid var(--win11-accent) !important;
+  background: var(--background-fill-primary) !important;
+}
+
+/* Checkboxes with Semi-White Border */
+input[type="checkbox"], .gr-checkbox, input.svelte-1ojmf70 {
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  background-color: transparent !important;
+  transition: border 0.2s ease;
+}
+
+input[type="checkbox"]:checked, .gr-checkbox:checked {
+  background-color: var(--win11-accent) !important;
+  border-color: var(--win11-accent) !important;
+}
+
+span.svelte-s1r2yt {
+  margin-top: -3px;
+}
+
+.svelte-1ojmf70.primary {
+  top: -1px;
+  margin-right: 5px;
+}
+
+.svelte-1ojmf70.input-accordion-checkbox {
+  top: -1px;
+}
+
+/* --- Primary Action Buttons (Generate, Cancel, Skip) --- */
+#txt2img_generate, #img2img_generate,
+#txt2img_interrupt, #img2img_interrupt,
+#txt2img_skip, #img2img_skip {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: none !important;
+  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.2s ease, transform 0.1s ease, color 0.2s ease !important;
+}
+
+/* Hover State */
+#txt2img_generate:hover:not(:disabled), #img2img_generate:hover:not(:disabled),
+#txt2img_interrupt:hover:not(:disabled), #img2img_interrupt:hover:not(:disabled),
+#txt2img_skip:hover:not(:disabled), #img2img_skip:hover:not(:disabled) {
+  background-color: #e6e6e6 !important;
+  transform: translateY(-1px);
+}
+
+/* Disabled/Canceled State (Semi-White) */
+#txt2img_generate:disabled, #img2img_generate:disabled,
+#txt2img_interrupt:disabled, #img2img_interrupt:disabled,
+#txt2img_skip:disabled, #img2img_skip:disabled {
+  background-color: rgba(255, 255, 255, 0.4) !important; 
+  color: rgba(0, 0, 0, 0.5) !important; 
+  box-shadow: none !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+}
+
+/* --- Smooth Line Progress Bar (No Glow) --- */
+.progressDiv, .progress-bar, .wrap .progress {
+  height: 6px !important; 
+  background-color: var(--background-fill-secondary) !important;
+  border: 1px solid var(--border-color-primary) !important;
+  overflow: hidden;
+}
+
+.progressDiv .progress, .progress-bar > div, .wrap .progress > div {
+  background-color: var(--win11-accent) !important;
+  /* This ensures the bar glides smoothly between steps instead of jumping */
+  transition: width 0.3s ease-out !important; 
+}
+
+/* Extra Networks (LoRA/Checkpoint) Modernized */
+.extra-network-pane .card {
+  width: 160px !important;
+  height: 240px !important;
+  font-size: 60% !important;
+  border-radius: 0 !important;
+  transition: .3s ease;
+  text-align: center;
+  background-color: var(--background-fill-primary);
+  border: 1px solid var(--border-color-primary);
+}
+
+.extra-network-pane .card:hover {
+  border-color: var(--win11-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  transform: translateY(-2px);
+}
+
+.extra-network-pane .card .preview {
+  object-position: top;
+}
+
+.extra-network-pane .card .button-row {
+  width: 100%;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  visibility: visible;
+  transition: .2s ease;
+}
+
+.extra-network-pane .card:hover .button-row {
+  opacity: 1;
+}
+
+.extra-network-pane .card-button {
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.extra-network-pane .card .actions {
+  height: 100%;
+  width: 100%;
+  padding: 0;
+  border-bottom: 0;
+  box-shadow: 0 0 5px 1px rgba(0, 0, 0, 0.5);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color .2s ease;
+}
+
+.extra-network-pane .card .actions > * {
+  pointer-events: auto;
+}
+
+.extra-network-pane .card:hover .actions {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.extra-network-pane .card .actions .name {
+  display: flex;
+  position: absolute;
+  justify-content: center;
+  align-items: center;
+  font-size: var(--section-header-text-size);
+  font-weight: normal;
+  background: rgba(30, 30, 30, 0.95);
+  border-top: 1px solid var(--border-color-primary);
+  width: 100%;
+  padding: .4em;
+  bottom: 0;
+  border-radius: 0;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.extra-network-pane .card .actions .description {
+  display: none !important;
+}
+
+/* Quicksettings Lock */
+#quicksettings > #setting_sd_vae {
+  min-width: 210px !important;
+  max-width: 210px !important;
+}
