@@ -10,6 +10,7 @@
   --button-secondary-background-fill-hover: #3a3a3a;
   --input-background-fill: #1a1a1a;
   --win11-accent: #60cdff;
+   --win11-accent-hover: #4ab5e8;
 }
 
 /* Force Sharp Corners Globally */
@@ -215,6 +216,62 @@ span.svelte-s1r2yt {
 
 .extra-network-pane .card .actions .description {
   display: none !important;
+}
+
+/* --- Primary Action Buttons (Generate, Cancel, Skip) --- */
+#txt2img_generate, #img2img_generate,
+#txt2img_interrupt, #img2img_interrupt,
+#txt2img_skip, #img2img_skip {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: none !important;
+  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.2s ease, transform 0.1s ease, color 0.2s ease !important;
+}
+
+/* Hover State */
+#txt2img_generate:hover:not(:disabled), #img2img_generate:hover:not(:disabled),
+#txt2img_interrupt:hover:not(:disabled), #img2img_interrupt:hover:not(:disabled),
+#txt2img_skip:hover:not(:disabled), #img2img_skip:hover:not(:disabled) {
+  background-color: #e6e6e6 !important;
+  transform: translateY(-1px);
+}
+
+/* Disabled/Canceled State (Semi-White) */
+#txt2img_generate:disabled, #img2img_generate:disabled,
+#txt2img_interrupt:disabled, #img2img_interrupt:disabled,
+#txt2img_skip:disabled, #img2img_skip:disabled {
+  background-color: rgba(255, 255, 255, 0.4) !important; 
+  color: rgba(0, 0, 0, 0.5) !important; 
+  box-shadow: none !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+}
+
+/* --- Smooth Line Progress Bar (No Glow) --- */
+.progressDiv, .progress-bar, .wrap .progress {
+  height: 6px !important; 
+  background-color: var(--background-fill-secondary) !important;
+  border: 1px solid var(--border-color-primary) !important;
+  overflow: hidden;
+}
+
+.progressDiv .progress, .progress-bar > div, .wrap .progress > div {
+  background-color: var(--win11-accent) !important;
+  transition: width 0.3s ease-out !important; 
+}
+
+/* Checkboxes with Semi-White Border */
+input[type="checkbox"], .gr-checkbox, input.svelte-1ojmf70 {
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  background-color: transparent !important;
+  transition: border 0.2s ease;
+}
+
+input[type="checkbox"]:checked, .gr-checkbox:checked {
+  background-color: var(--win11-accent) !important;
+  border-color: var(--win11-accent) !important;
 }
 
 /* Quicksettings Lock */
