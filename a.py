@@ -3,15 +3,12 @@ import sys
 import subprocess
 import urllib.request
 import zipfile
-import shutil
-import tarfile
 import json
 
 # === CONFIGURATION ===
 MAIN_DIR = "/kaggle/working/x1101"
 SD_REPO_URL = "https://github.com/Haoming02/sd-webui-forge-classic.git"
 SD_BRANCH = "neo"
-ARIA2_STATIC_URL = "https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
 
 def log(msg, is_error=False):
     """Custom logger for clear debugging output."""
@@ -19,7 +16,7 @@ def log(msg, is_error=False):
     print(f"{prefix}{msg}")
 
 def run_cmd(cmd, env=None, cwd=None):
-    """Executes system commands and captures robust debugging information."""
+    """Executes commands and captures robust debugging information if they fail."""
     try:
         log(f"Executing: {' '.join(cmd)}")
         result = subprocess.run(cmd, env=env, cwd=cwd, check=True, capture_output=True, text=True)
@@ -45,9 +42,9 @@ def get_latest_python_url():
                     name = asset.get("name", "")
                     if "headless" in name and "linux-x86_64" in name and name.endswith(".zip"):
                         download_url = asset.get("browser_download_url")
-                        log(f"Successfully resolved dynamic link: {download_url}")
+                        log(f"Resolved dynamic link: {download_url}")
                         return download_url
-        raise Exception("Could not find a valid 3.10 headless release in the API response.")
+        raise Exception("Could not find a valid 3.10 headless release.")
     except Exception as e:
         raise Exception(f"Failed to fetch dynamic Python link: {e}")
 
@@ -72,14 +69,14 @@ def setup_environment():
         else:
             log("Portable Python already extracted.")
         
-        # Resolve the inner bin directory path dynamically
+        # Resolve directories dynamically via path variables
         extracted_subdirs = [d for d in os.listdir(python_extract_dir) if os.path.isdir(f"{python_extract_dir}/{d}")]
         inner_python_dir = f"{python_extract_dir}/{extracted_subdirs[0]}" if extracted_subdirs else python_extract_dir
         
         python_bin_dir = f"{inner_python_dir}/bin"
         python_exe = f"{python_bin_dir}/python"
         
-        # FIX: Grant execute permissions to all binaries in the portable bin folder
+        # Fix permissions so Python can actually run
         log("Restoring execute permissions for portable binaries...")
         run_cmd(["chmod", "-R", "+x", python_bin_dir])
         
@@ -88,31 +85,16 @@ def setup_environment():
         isolated_env["PATH"] = f"{python_bin_dir}:{isolated_env.get('PATH', '')}"
         isolated_env["PYTHONPATH"] = "" 
         
-        # 3. Bootstrap Pip and Install UV
-        log("Bootstrapping pip and installing uv for fast dependency resolution...")
+        # 3. Bootstrap Pip and Install Dependencies natively via standard pip
+        log("Bootstrapping pip...")
         run_cmd([python_exe, "-m", "ensurepip", "--upgrade"], env=isolated_env)
         run_cmd([python_exe, "-m", "pip", "install", "--upgrade", "pip"], env=isolated_env)
-        run_cmd([python_exe, "-m", "pip", "install", "uv"], env=isolated_env)
         
-        # 4. Download and configure aria2c natively in the portable bin
-        aria2_exe = f"{python_bin_dir}/aria2c"
-        if not os.path.exists(aria2_exe):
-            log("Downloading static aria2c binary for isolated model downloads...")
-            aria2_tar_path = f"{MAIN_DIR}/aria2.tar.bz2"
-            urllib.request.urlretrieve(ARIA2_STATIC_URL, aria2_tar_path)
-            
-            log("Extracting aria2c...")
-            with tarfile.open(aria2_tar_path, "r:bz2") as tar:
-                for member in tar.getmembers():
-                    if member.name.endswith("aria2c"):
-                        member.name = os.path.basename(member.name) 
-                        tar.extract(member, path=python_bin_dir)
-                        break
-            os.remove(aria2_tar_path)
-            run_cmd(["chmod", "+x", aria2_exe])
-            log("aria2c secured in portable bin directory.")
+        log("Installing uv and aria2 natively via standard pip...")
+        # The 'aria2' PyPI package provides the aria2c binary directly
+        run_cmd([python_exe, "-m", "pip", "install", "uv", "aria2"], env=isolated_env)
         
-        # 5. Clone Stable Diffusion Repository
+        # 4. Clone Stable Diffusion Repository
         sd_dir = f"{MAIN_DIR}/sd-webui-forge-classic"
         if not os.path.exists(sd_dir):
             log(f"Cloning SD repository (Branch: {SD_BRANCH})...")
@@ -120,11 +102,14 @@ def setup_environment():
         else:
             log("SD repository already exists. Skipping clone.")
             
-        # 6. Final Diagnostics and Verification
+        # 5. Final Diagnostics and Verification
         log("=== Verification Check ===")
         log(f"Python: {run_cmd([python_exe, '--version'], env=isolated_env).strip()}")
+        
         uv_exe = f"{python_bin_dir}/uv"
         log(f"UV: {run_cmd([uv_exe, '--version'], env=isolated_env).strip()}")
+        
+        aria2_exe = f"{python_bin_dir}/aria2c"
         log(f"Aria2c: {run_cmd([aria2_exe, '--version'], env=isolated_env).splitlines()[0]}")
         
         log("========================================")
