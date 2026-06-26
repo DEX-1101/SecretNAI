@@ -10,11 +10,8 @@ import tarfile
 MAIN_DIR = "/kaggle/working/x1101"
 SD_REPO_URL = "https://github.com/Haoming02/sd-webui-forge-classic.git"
 SD_BRANCH = "neo"
-
-# Updated to Python 3.13.12 based on bjia56's naming convention
-# Note: If this exact build tag does not exist yet on the repo, this will throw a 404 HTTP Error.
-PYTHON_ZIP_URL = "https://github.com/bjia56/portable-python/releases/download/cpython-v3.13.12-build.0/python-headless-3.13.12-linux-x86_64.zip"
-
+# SD runs best on 3.10.x. Using bjia56's headless linux build.
+PYTHON_ZIP_URL = "https://github.com/bjia56/portable-python/releases/download/cpython-v3.10.14-build.0/python-headless-3.10.14-linux-x86_64.zip"
 # Static build of aria2 for isolation
 ARIA2_STATIC_URL = "https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
 
@@ -32,16 +29,11 @@ def run_cmd(cmd, env=None, cwd=None):
     except subprocess.CalledProcessError as e:
         log(f"Command failed: {' '.join(cmd)}", is_error=True)
         log(f"Error Output: {e.stderr.strip()}", is_error=True)
-        
-        # Specific debugging message for 3.13 dependency failures
-        if "pip" in cmd or "uv" in cmd:
-            log("DEBUG TIP: This failure is likely because Python 3.13 lacks pre-compiled wheels for PyTorch or xformers. Consider rolling back to 3.10 if this persists.", is_error=True)
-            
         raise
 
 def setup_environment():
     try:
-        log("Starting Isolated SD Setup (Python 3.13.12 Experimental)...")
+        log("Starting Isolated SD Setup...")
         os.makedirs(MAIN_DIR, exist_ok=True)
 
         # 1. Download and Extract Portable Python
@@ -111,13 +103,10 @@ def setup_environment():
         log(f"Aria2c: {run_cmd([aria2_exe, '--version'], env=isolated_env).splitlines()[0]}")
         
         log("========================================")
-        log("Setup complete! Your isolated Python 3.13 environment is ready.")
+        log("Setup complete! Your isolated environment is ready.")
         log(f"Working Directory: {MAIN_DIR}")
         log(f"To run webui, you must execute it using: {python_exe}")
         
-    except urllib.error.HTTPError as e:
-        log(f"CRITICAL FAILURE: Could not download from URL. Python 3.13.12 might not exist on the portable-python repo yet. Error: {e}", is_error=True)
-        sys.exit(1)
     except Exception as e:
         log(f"CRITICAL FAILURE: An unhandled exception interrupted the script: {e}", is_error=True)
         sys.exit(1)
