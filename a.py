@@ -79,6 +79,10 @@ def setup_environment():
         python_bin_dir = f"{inner_python_dir}/bin"
         python_exe = f"{python_bin_dir}/python"
         
+        # FIX: Grant execute permissions to all binaries in the portable bin folder
+        log("Restoring execute permissions for portable binaries...")
+        run_cmd(["chmod", "-R", "+x", python_bin_dir])
+        
         # 2. Strict Environment Isolation
         isolated_env = os.environ.copy()
         isolated_env["PATH"] = f"{python_bin_dir}:{isolated_env.get('PATH', '')}"
