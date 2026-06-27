@@ -10,7 +10,7 @@ MAIN_DIR = "/kaggle/working/x1101"
 SHORTCUT_DIR = "/kaggle/working"
 SD_REPO_URL = "https://github.com/Haoming02/sd-webui-forge-classic.git"
 SD_BRANCH = "neo"
-TARGET_PYTHON = "3.13" # Note: Change back to 3.10 if PyTorch fails to build wheels
+TARGET_PYTHON = "3.10" # Note: Change back to 3.10 if PyTorch fails to build wheels
 
 # === TERMINAL COLORS ===
 class C:
