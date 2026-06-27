@@ -42,6 +42,16 @@ def run_cmd(cmd, env=None, cwd=None):
         print(f"{C.RED}{e.stderr.strip()}{C.RST}")
         raise
 
+def run_cmd_live(cmd, env=None, cwd=None):
+    """Streams command output directly to the console for real-time debugging."""
+    log(f"Executing: {' '.join(cmd)}", "info")
+    try:
+        # By omitting capture_output, the underlying process prints directly to the terminal
+        subprocess.run(cmd, env=env, cwd=cwd, check=True)
+    except subprocess.CalledProcessError as e:
+        log(f"Command failed with exit code {e.returncode}: {' '.join(cmd)}", "err")
+        raise
+
 def get_latest_python_url():
     """Dynamically fetches the latest targeted headless Linux build."""
     log(f"Resolving latest portable-python {TARGET_PYTHON} release...")
@@ -116,20 +126,19 @@ def setup_environment():
         else:
             log("WebUI repository already exists, skipping clone.", "warn")
 
-        # 5. Pre-install Heavy ML Dependencies (Split for Index Compatibility)
-        log("Pre-fetching PyTorch 2.4.1 (cu121)...")
-        # Install Torch stack exclusively from the PyTorch index
-        run_cmd([
-            uv_exe, "pip", "install", 
+        # 5. Pre-install Heavy ML Dependencies (Debug Mode)
+        log("Pre-fetching PyTorch 2.4.1 (cu121) [DEBUG MODE]...")
+        # Using run_cmd_live and -v for verbose output
+        run_cmd_live([
+            uv_exe, "pip", "install", "-v", 
             "torch==2.4.1", "torchvision==0.19.1", "torchaudio==2.4.1", 
             "--index-url", "https://download.pytorch.org/whl/cu121", 
             "--python", python_exe
         ], env=isolated_env)
         
-        log("Pre-fetching Xformers...")
-        # Install Xformers from standard PyPI
-        run_cmd([
-            uv_exe, "pip", "install", 
+        log("Pre-fetching Xformers [DEBUG MODE]...")
+        run_cmd_live([
+            uv_exe, "pip", "install", "-v", 
             "xformers==0.0.28.post1", 
             "--python", python_exe
         ], env=isolated_env)
@@ -140,8 +149,8 @@ def setup_environment():
             req_txt = f"{sd_dir}/requirements.txt"
             
         if os.path.exists(req_txt):
-            log("Installing repository requirements...")
-            run_cmd([uv_exe, "pip", "install", "-r", req_txt, "--python", python_exe], env=isolated_env)
+            log("Installing repository requirements [DEBUG MODE]...")
+            run_cmd_live([uv_exe, "pip", "install", "-v", "-r", req_txt, "--python", python_exe], env=isolated_env)
             
         log("Machine Learning dependencies installed successfully.", "ok")
 
