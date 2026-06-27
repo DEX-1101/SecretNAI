@@ -10,7 +10,7 @@ MAIN_DIR = "/kaggle/working/x1101"
 SHORTCUT_DIR = "/kaggle/working"
 SD_REPO_URL = "https://github.com/Haoming02/sd-webui-forge-classic.git"
 SD_BRANCH = "neo"
-TARGET_PYTHON = "3.12" # Note: Change back to 3.10 if PyTorch fails to build wheels
+TARGET_PYTHON = "3.12" # Updated to 3.12
 
 # === TERMINAL COLORS ===
 class C:
@@ -116,12 +116,21 @@ def setup_environment():
         else:
             log("WebUI repository already exists, skipping clone.", "warn")
 
-        # 5. Pre-install Heavy ML Dependencies (Concurrent Setup)
-        log("Pre-fetching PyTorch, Xformers, and dependencies concurrently...")
+        # 5. Pre-install Heavy ML Dependencies (Split for Index Compatibility)
+        log("Pre-fetching PyTorch 2.4.1 (cu121)...")
+        # Install Torch stack exclusively from the PyTorch index
         run_cmd([
             uv_exe, "pip", "install", 
-            "torch==2.3.1", "torchvision==0.18.1", "torchaudio==2.3.1", "xformers==0.0.27",
+            "torch==2.4.1", "torchvision==0.19.1", "torchaudio==2.4.1", 
             "--index-url", "https://download.pytorch.org/whl/cu121", 
+            "--python", python_exe
+        ], env=isolated_env)
+        
+        log("Pre-fetching Xformers...")
+        # Install Xformers from standard PyPI
+        run_cmd([
+            uv_exe, "pip", "install", 
+            "xformers==0.0.28.post1", 
             "--python", python_exe
         ], env=isolated_env)
         
@@ -134,7 +143,7 @@ def setup_environment():
             log("Installing repository requirements...")
             run_cmd([uv_exe, "pip", "install", "-r", req_txt, "--python", python_exe], env=isolated_env)
             
-        log("Machine Learning dependencies installed.", "ok")
+        log("Machine Learning dependencies installed successfully.", "ok")
 
         # 6. Create Execution Shortcut
         log("Generating shortened execution script...")
@@ -143,6 +152,8 @@ def setup_environment():
             f.write(f'#!/bin/bash\n')
             f.write(f'export PATH="{python_bin_dir}:$PATH"\n')
             f.write(f'export PYTHONPATH=""\n')
+            # Environment variables to enforce UI bypasses if needed
+            f.write(f'export COMMANDLINE_ARGS="--share --api"\n') 
             f.write(f'{python_exe} {sd_dir}/launch.py "$@"\n')
         os.chmod(shortcut_path, 0o755)
         log(f"Shortcut created at: {shortcut_path}", "ok")
@@ -151,11 +162,17 @@ def setup_environment():
         print(f"\n{C.BOLD}=== System Verification ==={C.RST}")
         log(f"Python: {run_cmd([python_exe, '--version'], env=isolated_env).strip()}")
         log(f"UV: {run_cmd([uv_exe, '--version'], env=isolated_env).strip()}")
-        log(f"Aria2c: {run_cmd([f'{python_bin_dir}/aria2c', '--version'], env=isolated_env).splitlines()[0]}")
+        
+        # Verify CUDA availability via the newly installed torch
+        cuda_check = run_cmd([python_exe, "-c", "import torch; print(torch.cuda.is_available())"], env=isolated_env).strip()
+        if cuda_check == "True":
+            log("PyTorch CUDA Access: Verified", "ok")
+        else:
+            log("PyTorch CUDA Access: Failed. Check Kaggle GPU settings.", "err")
         
         print(f"\n{C.GRN}{C.BOLD}Setup Complete!{C.RST}")
-        print(f"{C.CYN}To start the WebUI with arguments, run this in a new cell:{C.RST}")
-        print(f"{C.BOLD}!./run.sh --share --api{C.RST}\n")
+        print(f"{C.CYN}To start the WebUI, run this in a new cell:{C.RST}")
+        print(f"{C.BOLD}!./run.sh{C.RST}\n")
         
     except Exception as e:
         log(f"Script interrupted: {e}", "err")
