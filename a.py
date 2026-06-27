@@ -90,6 +90,7 @@ def setup_environment():
         
         python_bin_dir = f"{inner_python_dir}/bin"
         python_exe = f"{python_bin_dir}/python"
+        uv_exe = f"{python_bin_dir}/uv"
         
         log("Configuring execution permissions...")
         run_cmd(["chmod", "-R", "+x", python_bin_dir])
@@ -115,7 +116,27 @@ def setup_environment():
         else:
             log("WebUI repository already exists, skipping clone.", "warn")
 
-        # 5. Create Execution Shortcut
+        # 5. Pre-install Heavy ML Dependencies (Concurrent Setup)
+        log("Pre-fetching PyTorch, Xformers, and dependencies concurrently...")
+        run_cmd([
+            uv_exe, "pip", "install", 
+            "torch==2.3.1", "torchvision==0.18.1", "torchaudio==2.3.1", "xformers==0.0.27",
+            "--index-url", "https://download.pytorch.org/whl/cu121", 
+            "--python", python_exe
+        ], env=isolated_env)
+        
+        # Parse and install repo-specific requirements
+        req_txt = f"{sd_dir}/requirements_versions.txt"
+        if not os.path.exists(req_txt):
+            req_txt = f"{sd_dir}/requirements.txt"
+            
+        if os.path.exists(req_txt):
+            log("Installing repository requirements...")
+            run_cmd([uv_exe, "pip", "install", "-r", req_txt, "--python", python_exe], env=isolated_env)
+            
+        log("Machine Learning dependencies installed.", "ok")
+
+        # 6. Create Execution Shortcut
         log("Generating shortened execution script...")
         shortcut_path = f"{SHORTCUT_DIR}/run.sh"
         with open(shortcut_path, "w") as f:
@@ -126,10 +147,10 @@ def setup_environment():
         os.chmod(shortcut_path, 0o755)
         log(f"Shortcut created at: {shortcut_path}", "ok")
             
-        # 6. Verification
+        # 7. Verification
         print(f"\n{C.BOLD}=== System Verification ==={C.RST}")
         log(f"Python: {run_cmd([python_exe, '--version'], env=isolated_env).strip()}")
-        log(f"UV: {run_cmd([f'{python_bin_dir}/uv', '--version'], env=isolated_env).strip()}")
+        log(f"UV: {run_cmd([uv_exe, '--version'], env=isolated_env).strip()}")
         log(f"Aria2c: {run_cmd([f'{python_bin_dir}/aria2c', '--version'], env=isolated_env).splitlines()[0]}")
         
         print(f"\n{C.GRN}{C.BOLD}Setup Complete!{C.RST}")
