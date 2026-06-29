@@ -1,4 +1,4 @@
-import os, subprocess, requests, re, argparse, shutil, zipfile
+import os, subprocess, requests, re, argparse, shutil, zipfile, itertools
 from collections import defaultdict
 
 COLOR_FN = '\033[96m'
@@ -8,8 +8,8 @@ COLOR_ERR = '\033[91m'
 COLOR_RESET = '\033[0m'
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--hf", default="", help="HuggingFace API token")
-parser.add_argument("--civitai", default="", help="Civitai API token")
+parser.add_argument("--hf", default="", help="HuggingFace API token(s), separated by ::")
+parser.add_argument("--civitai", default="", help="Civitai API token(s), separated by ::")
 parser.add_argument("--req", action="store_true", help="Install requirements.txt in cloned repos")
 parser.add_argument("--zip", default="", help="Password for extracting ZIP files")
 parser.add_argument("--upload_to", default="", help="Upload folder to HF: username/repo::[remote_folder]::local_folder or username/repo::local_folder")
@@ -21,8 +21,12 @@ try:
 except:
     user_ns = globals()
 
-HF_TOKEN = args.hf
-CIVITAI_TOKEN = args.civitai
+# Token parsing and cycle initialization
+hf_tokens = [t.strip() for t in args.hf.split("::") if t.strip()]
+civitai_tokens = [t.strip() for t in args.civitai.split("::") if t.strip()]
+
+hf_cycle = itertools.cycle(hf_tokens) if hf_tokens else None
+civitai_cycle = itertools.cycle(civitai_tokens) if civitai_tokens else None
 
 VAR_REGEX = re.compile(r'\{([^}]+)\}')
 
@@ -126,14 +130,15 @@ def run_upload():
         from huggingface_hub import HfApi
         print("\r\033[K", end="")
         
-    if not HF_TOKEN:
+    upload_token = hf_tokens[0] if hf_tokens else ""
+    if not upload_token:
         print(f"❌ HF Token is required for uploading! Pass it via {COLOR_FN}--hf{COLOR_RESET}")
         return
     if not os.path.exists(local_folder):
         print(f"❌ Local folder {COLOR_DIR}{local_folder}{COLOR_RESET} does not exist!")
         return
 
-    api = HfApi(token=HF_TOKEN)
+    api = HfApi(token=upload_token)
     
     try:
         api.model_info(repo_id)
@@ -222,10 +227,13 @@ else:
                 print()
                 continue
 
-            if "civitai" in url and CIVITAI_TOKEN and "token=" not in url:
-                url += f"{'&' if '?' in url else '?'}token={CIVITAI_TOKEN}"
+            # Grab the next token in the cycle for this specific file download
+            current_civitai = next(civitai_cycle) if civitai_cycle else ""
+            if "civitai" in url and current_civitai and "token=" not in url:
+                url += f"{'&' if '?' in url else '?'}token={current_civitai}"
 
-            auth = f"Bearer {HF_TOKEN}" if "huggingface" in url and HF_TOKEN else ""
+            current_hf = next(hf_cycle) if hf_cycle else ""
+            auth = f"Bearer {current_hf}" if "huggingface" in url and current_hf else ""
             h = {"User-Agent": "Mozilla/5.0"}
             if auth: h["Authorization"] = auth
             
@@ -245,8 +253,8 @@ else:
             cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
             
             if furl == url:
-                if "huggingface.co" in furl and HF_TOKEN:
-                    cmd.append(f"--header=Authorization: Bearer {HF_TOKEN}")
+                if "huggingface.co" in furl and current_hf:
+                    cmd.append(f"--header=Authorization: Bearer {current_hf}")
                 
             cmd.append(furl)
             
