@@ -1,4 +1,4 @@
-import os, subprocess, requests, re, argparse, shutil, zipfile, itertools
+import os, subprocess, requests, re, argparse, shutil, zipfile
 from collections import defaultdict
 
 COLOR_FN = '\033[96m'
@@ -6,6 +6,7 @@ COLOR_OK = '\033[92m'
 COLOR_DIR = '\033[93m'
 COLOR_ERR = '\033[91m'
 COLOR_RESET = '\033[0m'
+COLOR_WARN = '\033[93m'
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="", help="HuggingFace API token(s), separated by ::")
@@ -21,12 +22,9 @@ try:
 except:
     user_ns = globals()
 
-# Token parsing and cycle initialization
+# Token parsing into lists for the adaptive fallback
 hf_tokens = [t.strip() for t in args.hf.split("::") if t.strip()]
 civitai_tokens = [t.strip() for t in args.civitai.split("::") if t.strip()]
-
-hf_cycle = itertools.cycle(hf_tokens) if hf_tokens else None
-civitai_cycle = itertools.cycle(civitai_tokens) if civitai_tokens else None
 
 VAR_REGEX = re.compile(r'\{([^}]+)\}')
 
@@ -55,13 +53,13 @@ else:
         k_res = resolve_vars(k)
         DOWNLOAD_BATCHES[k_res] = [resolve_vars(url) for url in v]
 
-def get_info(url, headers):
+def get_info(url, headers, suppress_err=False):
     try:
         with requests.get(url, headers=headers, stream=True, timeout=15) as r:
             r.raise_for_status()
             
             if "/login" in r.url:
-                print(f"❌ Authentication failed: Redirected to login page. Please check your Civitai API token.")
+                if not suppress_err: print(f"❌ Authentication failed: Redirected to login page.")
                 return None, None
                 
             m = re.search('filename="?([^";]+)"?', r.headers.get("Content-Disposition", ""))
@@ -69,7 +67,7 @@ def get_info(url, headers):
             if "civitai" in url and "." not in fn: fn += ".safetensors"
             return fn, r.url
     except Exception as e:
-        print(f"❌ Failed to access link: {e}")
+        if not suppress_err: print(f"❌ Failed to access link: {e}")
         return None, None
 
 def extract_zip(file_path, folder, pwd):
@@ -184,6 +182,7 @@ else:
         
         for url in links:
             if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
+                # [GitHub cloning logic remains the same]
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
                 repo_path = os.path.join(folder, repo_name)
                 clone_success = False
@@ -205,72 +204,98 @@ else:
                         print(f"\n❌ System error occurred: {e}")
                 
                 if args.req and clone_success:
+                    # [Requirements install logic remains the same]
                     print(f"Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
-                    
-                    if not os.path.exists(req_file):
-                        print(f"[{COLOR_ERR}No requirements.txt found{COLOR_RESET}]")
-                    elif os.path.getsize(req_file) == 0:
-                        print(f"[{COLOR_ERR}requirements.txt is empty{COLOR_RESET}]")
+                    if not os.path.exists(req_file): print(f"[{COLOR_ERR}No requirements.txt found{COLOR_RESET}]")
+                    elif os.path.getsize(req_file) == 0: print(f"[{COLOR_ERR}requirements.txt is empty{COLOR_RESET}]")
                     else:
                         try:
                             req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
-                            if req_p.returncode == 0:
-                                print(f"[{COLOR_OK}OK{COLOR_RESET}]")
+                            if req_p.returncode == 0: print(f"[{COLOR_OK}OK{COLOR_RESET}]")
                             else:
                                 err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
-                                err_msg = err_lines[-1] if err_lines else "Unknown install error"
-                                print(f"[{COLOR_ERR}Failed: {err_msg}{COLOR_RESET}]")
-                        except Exception as e:
-                            print(f"[{COLOR_ERR}System error: {e}{COLOR_RESET}]")
-                
+                                print(f"[{COLOR_ERR}Failed: {err_lines[-1] if err_lines else 'Unknown'}{COLOR_RESET}]")
+                        except Exception as e: print(f"[{COLOR_ERR}System error: {e}{COLOR_RESET}]")
                 print()
                 continue
 
-            # Grab the next token in the cycle for this specific file download
-            current_civitai = next(civitai_cycle) if civitai_cycle else ""
-            if "civitai" in url and current_civitai and "token=" not in url:
-                url += f"{'&' if '?' in url else '?'}token={current_civitai}"
-
-            current_hf = next(hf_cycle) if hf_cycle else ""
-            auth = f"Bearer {current_hf}" if "huggingface" in url and current_hf else ""
-            h = {"User-Agent": "Mozilla/5.0"}
-            if auth: h["Authorization"] = auth
+            # Determine platform and which tokens to use for the retry loop
+            is_civitai = "civitai" in url.lower()
+            is_hf = "huggingface" in url.lower()
             
-            fn, furl = get_info(url, h)
-            if not fn: continue
-
-            file_path = os.path.join(folder, fn)
-            # Skip if the file exists and there's no active .aria2 active download file
-            if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
-                print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
-                if fn.lower().endswith('.zip'):
-                    extract_zip(file_path, folder, args.zip)
-                print()
-                continue
-
-            print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET}")
-            cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
-            
-            if furl == url:
-                if "huggingface.co" in furl and current_hf:
-                    cmd.append(f"--header=Authorization: Bearer {current_hf}")
+            if is_civitai and civitai_tokens:
+                tokens_to_try = civitai_tokens
+            elif is_hf and hf_tokens:
+                tokens_to_try = hf_tokens
+            else:
+                tokens_to_try = [""] # Run once without tokens if none are provided
                 
-            cmd.append(furl)
-            
-            try:
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                for line in p.stdout:
-                    if line.startswith("[#"): print(f"\r{line.strip():<20}", end="", flush=True)
-                p.wait()
+            download_success = False
+
+            for attempt, current_token in enumerate(tokens_to_try, 1):
+                test_url = url
+                if is_civitai and current_token and "token=" not in test_url:
+                    test_url += f"{'&' if '?' in test_url else '?'}token={current_token}"
+
+                auth = f"Bearer {current_token}" if is_hf and current_token else ""
+                h = {"User-Agent": "Mozilla/5.0"}
+                if auth: h["Authorization"] = auth
                 
-                if p.returncode == 0:
-                    print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
+                # Suppress errors unless it's the last token attempt
+                is_last_attempt = (attempt == len(tokens_to_try))
+                fn, furl = get_info(test_url, h, suppress_err=not is_last_attempt)
+                
+                if not fn: 
+                    if not is_last_attempt:
+                        print(f"⚠️ {COLOR_WARN}Token {attempt} failed metadata access. Retrying with next token...{COLOR_RESET}")
+                    continue
+
+                file_path = os.path.join(folder, fn)
+                
+                if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
+                    print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
                     if fn.lower().endswith('.zip'):
                         extract_zip(file_path, folder, args.zip)
-                else:
-                    print(f"❌ Download failed (Aria2 Error Code: {p.returncode})")
-            except Exception as e:
-                print(f"❌ System error occurred: {e}")
+                    print()
+                    download_success = True
+                    break
+
+                attempt_str = f" [Attempt {attempt}/{len(tokens_to_try)}]" if len(tokens_to_try) > 1 else ""
+                print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}")
+                
+                cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
+                
+                if furl == test_url:
+                    if "huggingface.co" in furl and is_hf and current_token:
+                        cmd.append(f"--header=Authorization: Bearer {current_token}")
+                    
+                cmd.append(furl)
+                
+                try:
+                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                    for line in p.stdout:
+                        if line.startswith("[#"): print(f"\r{line.strip():<20}", end="", flush=True)
+                    p.wait()
+                    
+                    if p.returncode == 0:
+                        print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
+                        if fn.lower().endswith('.zip'):
+                            extract_zip(file_path, folder, args.zip)
+                        download_success = True
+                        break # Success! Break out of the token retry loop
+                    else:
+                        if not is_last_attempt:
+                            print(f"\n⚠️ {COLOR_WARN}Download failed with Aria2 Code {p.returncode}. Retrying with next token...{COLOR_RESET}")
+                        else:
+                            print(f"\n❌ Download failed (Aria2 Error Code: {p.returncode})")
+                except Exception as e:
+                    if not is_last_attempt:
+                        print(f"\n⚠️ {COLOR_WARN}System error: {e}. Retrying with next token...{COLOR_RESET}")
+                    else:
+                        print(f"\n❌ System error occurred: {e}")
+            
+            if not download_success and len(tokens_to_try) > 1:
+                print(f"❌ {COLOR_ERR}All provided tokens failed for this file.{COLOR_RESET}")
                 
             print()
