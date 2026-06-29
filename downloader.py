@@ -182,7 +182,6 @@ else:
         
         for url in links:
             if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
-                # [GitHub cloning logic remains the same]
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
                 repo_path = os.path.join(folder, repo_name)
                 clone_success = False
@@ -204,7 +203,6 @@ else:
                         print(f"\n❌ System error occurred: {e}")
                 
                 if args.req and clone_success:
-                    # [Requirements install logic remains the same]
                     print(f"Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
                     req_file = os.path.join(repo_path, "requirements.txt")
                     if not os.path.exists(req_file): print(f"[{COLOR_ERR}No requirements.txt found{COLOR_RESET}]")
@@ -242,13 +240,10 @@ else:
                 h = {"User-Agent": "Mozilla/5.0"}
                 if auth: h["Authorization"] = auth
                 
-                # Suppress errors unless it's the last token attempt
                 is_last_attempt = (attempt == len(tokens_to_try))
                 fn, furl = get_info(test_url, h, suppress_err=not is_last_attempt)
                 
                 if not fn: 
-                    if not is_last_attempt:
-                        print(f"⚠️ {COLOR_WARN}Token {attempt} failed metadata access. Retrying with next token...{COLOR_RESET}")
                     continue
 
                 file_path = os.path.join(folder, fn)
@@ -261,7 +256,7 @@ else:
                     download_success = True
                     break
 
-                attempt_str = f" [Attempt {attempt}/{len(tokens_to_try)}]" if len(tokens_to_try) > 1 else ""
+                attempt_str = f" [Token {attempt}/{len(tokens_to_try)}]" if len(tokens_to_try) > 1 else ""
                 print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}")
                 
                 cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
@@ -285,15 +280,15 @@ else:
                         download_success = True
                         break # Success! Break out of the token retry loop
                     else:
-                        if not is_last_attempt:
-                            print(f"\n⚠️ {COLOR_WARN}Download failed with Aria2 Code {p.returncode}. Retrying with next token...{COLOR_RESET}")
-                        else:
+                        if is_last_attempt:
                             print(f"\n❌ Download failed (Aria2 Error Code: {p.returncode})")
+                        else:
+                            print() # Clears output line to restart neatly
                 except Exception as e:
-                    if not is_last_attempt:
-                        print(f"\n⚠️ {COLOR_WARN}System error: {e}. Retrying with next token...{COLOR_RESET}")
-                    else:
+                    if is_last_attempt:
                         print(f"\n❌ System error occurred: {e}")
+                    else:
+                        print()
             
             if not download_success and len(tokens_to_try) > 1:
                 print(f"❌ {COLOR_ERR}All provided tokens failed for this file.{COLOR_RESET}")
