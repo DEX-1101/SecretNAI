@@ -1,12 +1,14 @@
 import os, subprocess, requests, re, argparse, shutil, zipfile
 from collections import defaultdict
 
-COLOR_FN = '\033[96m'
-COLOR_OK = '\033[92m'
+COLOR_FN = '\033[97m' # White
+COLOR_OK = '\033[95m' # Magenta
 COLOR_DIR = '\033[93m'
 COLOR_ERR = '\033[91m'
 COLOR_RESET = '\033[0m'
-COLOR_WARN = '\033[93m'
+COLOR_WARN = '\033[93m' # Yellow
+COLOR_UNIT = '\033[95m' # Added color for units
+COLOR_SUCCESS = '\033[92m' # Green
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="", help="HuggingFace API token(s), separated by ::")
@@ -70,8 +72,10 @@ def get_info(url, headers, suppress_err=False):
         if not suppress_err: print(f"❌ Failed to access link: {e}")
         return None, None
 
-def extract_zip(file_path, folder, pwd):
-    if not file_path.lower().endswith('.zip'): return
+def extract_zip(file_path, folder, pwd, prefix=""):
+    if not file_path.lower().endswith('.zip'): 
+        if prefix: print(f"\r{prefix}\033[K")
+        return
     try:
         with zipfile.ZipFile(file_path, 'r') as z:
             if pwd:
@@ -79,14 +83,14 @@ def extract_zip(file_path, folder, pwd):
             infos = z.infolist()
             total = len(infos)
             if total == 0:
+                if prefix: print(f"\r{prefix}\033[K")
                 return
             
             ext_counts = defaultdict(int)
             skipped = 0
             
             for i, info in enumerate(infos, 1):
-                fname = info.filename if len(info.filename) < 60 else info.filename[:57] + '...'
-                print(f"\rExtracting [{i}/{total}]: {COLOR_FN}{fname}{COLOR_RESET}\033[K", end="", flush=True)
+                print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}◉ Extracting {i}/{total}{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                 
                 target_path = os.path.join(folder, info.filename)
                 
@@ -105,7 +109,7 @@ def extract_zip(file_path, folder, pwd):
             if skipped > 0:
                 ext_summary += f" | {COLOR_ERR}{skipped} skipped{COLOR_RESET}"
                 
-            print(f"\r🗡️ Extracted [{total}/{total}]: {COLOR_OK}Done{COLOR_RESET} [ {ext_summary} ]\033[K")
+            print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Extracted {ext_summary}{COLOR_OK}]{COLOR_RESET}\033[K")
     except Exception as e:
         print(f"\n❌ Error extracting {os.path.basename(file_path)}: {e}")
 
@@ -187,35 +191,61 @@ else:
                 clone_success = False
                 
                 if os.path.exists(repo_path):
-                    print(f"💀 {COLOR_FN}{repo_name}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
+                    prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                    print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     clone_success = True
                 else:
-                    print(f"🍆 Cloning: {COLOR_FN}{repo_name}{COLOR_RESET}", end="", flush=True)
+                    prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_name}{COLOR_RESET}"
+                    print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Cloning...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     try:
                         p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
                         if p.returncode != 0:
                             err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
-                            print(f"\n❌ Clone failed: {err}")
+                            print(f"\r❌ Clone failed: {err}\033[K")
                         else:
-                            print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
+                            prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                            print(f"\r{prefix}\033[K", end="", flush=True)
                             clone_success = True
                     except Exception as e:
-                        print(f"\n❌ System error occurred: {e}")
+                        print(f"\r❌ System error occurred: {e}\033[K")
                 
-                if args.req and clone_success:
-                    print(f"Installing requirements for {COLOR_FN}{repo_name}{COLOR_RESET}... ", end="", flush=True)
-                    req_file = os.path.join(repo_path, "requirements.txt")
-                    if not os.path.exists(req_file): print(f"[{COLOR_ERR}No requirements.txt found{COLOR_RESET}]")
-                    elif os.path.getsize(req_file) == 0: print(f"[{COLOR_ERR}requirements.txt is empty{COLOR_RESET}]")
-                    else:
-                        try:
-                            req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
-                            if req_p.returncode == 0: print(f"[{COLOR_OK}OK{COLOR_RESET}]")
-                            else:
-                                err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
-                                print(f"[{COLOR_ERR}Failed: {err_lines[-1] if err_lines else 'Unknown'}{COLOR_RESET}]")
-                        except Exception as e: print(f"[{COLOR_ERR}System error: {e}{COLOR_RESET}]")
-                print()
+                if clone_success:
+                    if args.req:
+                        req_file = os.path.join(repo_path, "requirements.txt")
+                        if os.path.exists(req_file) and os.path.getsize(req_file) > 0:
+                            req_prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                            print(f"\r{req_prefix} {COLOR_OK}[{COLOR_RESET}Installing reqs...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
+                            try:
+                                req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
+                                if req_p.returncode == 0: 
+                                    installed_pkgs = []
+                                    for line in (req_p.stdout + '\n' + req_p.stderr).splitlines():
+                                        line = line.strip()
+                                        if line.startswith('+ ') or line.startswith('~ '):
+                                            parts = line.split()
+                                            if len(parts) >= 2:
+                                                raw_pkg = " ".join(parts[1:])
+                                                m = re.match(r'^([a-zA-Z0-9_\-\.]+)(.*)$', raw_pkg)
+                                                if m:
+                                                    name, version = m.groups()
+                                                    installed_pkgs.append(f"{COLOR_FN}{name}{COLOR_RESET}{COLOR_WARN}{version}{COLOR_RESET}")
+                                                else:
+                                                    installed_pkgs.append(f"{COLOR_FN}{raw_pkg}{COLOR_RESET}")
+                                    
+                                    pkg_info = ""
+                                    if installed_pkgs:
+                                        pkg_str = ", ".join(installed_pkgs)
+                                        pkg_info = f" {COLOR_OK}[{COLOR_RESET}{pkg_str}{COLOR_OK}]{COLOR_RESET}"
+
+                                    success_prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                                    print(f"\r{success_prefix} {COLOR_OK}[{COLOR_RESET}Reqs installed{COLOR_OK}]{COLOR_RESET}{pkg_info}\033[K", end="", flush=True)
+                                else:
+                                    err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
+                                    print(f"\n❌ Reqs failed: {err_lines[-1] if err_lines else 'Unknown'}")
+                            except Exception as e: 
+                                print(f"\n❌ System error: {e}")
+                    
+                    print() # Append newline since we used end=""
                 continue
 
             # Determine platform and which tokens to use for the retry loop
@@ -249,15 +279,15 @@ else:
                 file_path = os.path.join(folder, fn)
                 
                 if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
-                    print(f"💀 {COLOR_FN}{fn}{COLOR_RESET} already exists in {COLOR_DIR}{folder}{COLOR_RESET}")
+                    prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {COLOR_FN}{file_path}{COLOR_RESET}"
                     if fn.lower().endswith('.zip'):
-                        extract_zip(file_path, folder, args.zip)
-                    print()
+                        extract_zip(file_path, folder, args.zip, prefix)
+                    else:
+                        print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}\033[K")
                     download_success = True
                     break
 
-                attempt_str = f" [Token {attempt}/{len(tokens_to_try)}]" if len(tokens_to_try) > 1 else ""
-                print(f"⬇️ Downloading: {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}")
+                attempt_str = f" [{COLOR_OK}⇋{COLOR_RESET} {attempt}/{COLOR_OK}{len(tokens_to_try)}{COLOR_RESET}]" if len(tokens_to_try) > 1 else ""
                 
                 cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
                 
@@ -270,13 +300,47 @@ else:
                 try:
                     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                     for line in p.stdout:
-                        if line.startswith("[#"): print(f"\r{line.strip():<20}", end="", flush=True)
+                        if line.startswith("[#"):
+                            clean_line = line.strip().strip('[]')
+                            parts = clean_line.split()
+                            if len(parts) >= 2:
+                                size_pct = parts[1]
+                                size, pct = size_pct, ""
+                                # Extract size and percentage if present
+                                if '(' in size_pct and size_pct.endswith(')'):
+                                    size, pct = size_pct.split('(')
+                                    pct = pct.rstrip(')')
+                                
+                                # Extract Download Speed (strip 'DL:')
+                                speed = next((p.replace('DL:', '') for p in parts if p.startswith('DL:')), '')
+                                
+                                # Apply colors to units
+                                if size: size = re.sub(r'([a-zA-Z]+)', f'{COLOR_UNIT}\\1{COLOR_RESET}', size)
+                                if speed: speed = re.sub(r'([a-zA-Z]+)', f'{COLOR_UNIT}\\1{COLOR_RESET}', speed)
+                                if pct: pct = pct.replace('%', f'{COLOR_UNIT}%{COLOR_RESET}')
+                                
+                                out_parts = []
+                                if size: out_parts.append(size) # Removed 'Size: ' prefix
+                                if pct: out_parts.append(f"[{pct}]")
+                                if speed: out_parts.append(f"DL: {speed}")
+                                
+                                aria_out = " ".join(out_parts)
+                                if aria_out:
+                                    # Wrap entire aria output in colored brackets
+                                    aria_out = f"{COLOR_OK}[{COLOR_RESET}{aria_out}{COLOR_OK}]{COLOR_RESET}"
+                                
+                                prefix = f"{COLOR_OK}◉{COLOR_RESET} {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}"
+                                
+                                # Overwrite line cleanly using \r and \033[K (clear to end of line)
+                                print(f"\r{prefix} {aria_out}\033[K", end="", flush=True)
                     p.wait()
                     
                     if p.returncode == 0:
-                        print(f" [{COLOR_OK}OK{COLOR_RESET}] | Saved to : {COLOR_DIR}{folder}{COLOR_RESET}")
+                        prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {COLOR_FN}{file_path}{COLOR_RESET}"
                         if fn.lower().endswith('.zip'):
-                            extract_zip(file_path, folder, args.zip)
+                            extract_zip(file_path, folder, args.zip, prefix)
+                        else:
+                            print(f"\r{prefix}\033[K")
                         download_success = True
                         break # Success! Break out of the token retry loop
                     else:
@@ -292,5 +356,3 @@ else:
             
             if not download_success and len(tokens_to_try) > 1:
                 print(f"❌ {COLOR_ERR}All provided tokens failed for this file.{COLOR_RESET}")
-                
-            print()
