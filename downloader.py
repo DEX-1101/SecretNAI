@@ -1,7 +1,7 @@
 import os, subprocess, requests, re, argparse, shutil, zipfile
 from collections import defaultdict
 
-COLOR_FN = '\033[1;37m' # Bold White (Fixes grey text in Kaggle)
+COLOR_FN = '\033[38;5;231m' # 256-color Pure White (Bypasses Kaggle grey override)
 COLOR_OK = '\033[95m' # Magenta
 COLOR_DIR = '\033[93m'
 COLOR_ERR = '\033[91m'
@@ -9,6 +9,9 @@ COLOR_RESET = '\033[0m'
 COLOR_WARN = '\033[93m' # Yellow
 COLOR_UNIT = '\033[95m' # Added color for units
 COLOR_SUCCESS = '\033[92m' # Green
+
+# Robust line wipe to prevent leftover characters in Kaggle
+CLEAR = '\r' + ' ' * 150 + '\r'
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="", help="HuggingFace API token(s), separated by ::")
@@ -74,7 +77,7 @@ def get_info(url, headers, suppress_err=False):
 
 def extract_zip(file_path, folder, pwd, prefix=""):
     if not file_path.lower().endswith('.zip'): 
-        if prefix: print(f"\r{prefix}{' '*40}\033[K")
+        if prefix: print(f"{CLEAR}{prefix}\033[K")
         return
     try:
         with zipfile.ZipFile(file_path, 'r') as z:
@@ -83,14 +86,14 @@ def extract_zip(file_path, folder, pwd, prefix=""):
             infos = z.infolist()
             total = len(infos)
             if total == 0:
-                if prefix: print(f"\r{prefix}{' '*40}\033[K")
+                if prefix: print(f"{CLEAR}{prefix}\033[K")
                 return
             
             ext_counts = defaultdict(int)
             skipped = 0
             
             for i, info in enumerate(infos, 1):
-                print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Extracting {i}/{total}{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K", end="", flush=True)
+                print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Extracting {i}/{total}{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                 
                 target_path = os.path.join(folder, info.filename)
                 
@@ -109,7 +112,7 @@ def extract_zip(file_path, folder, pwd, prefix=""):
             if skipped > 0:
                 ext_summary += f" | {COLOR_ERR}{skipped} skipped{COLOR_RESET}"
                 
-            print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Extracted {ext_summary}{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K")
+            print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Extracted {ext_summary}{COLOR_OK}]{COLOR_RESET}\033[K")
     except Exception as e:
         print(f"\n❌ Error extracting {os.path.basename(file_path)}: {e}")
 
@@ -130,7 +133,7 @@ def run_upload():
         print(f"⚙️ Installing {COLOR_OK}huggingface_hub{COLOR_RESET}... ", end="", flush=True)
         subprocess.run("pip install -q huggingface_hub", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         from huggingface_hub import HfApi
-        print("\r\033[K", end="")
+        print(f"{CLEAR}\033[K", end="")
         
     upload_token = hf_tokens[0] if hf_tokens else ""
     if not upload_token:
@@ -176,7 +179,7 @@ else:
         try:
             subprocess.run("apt-get install -y -qq aria2", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if shutil.which("aria2c"): 
-                print("\r\033[K", end="", flush=True)
+                print(f"{CLEAR}\033[K", end="", flush=True)
         except: pass
 
     for folder, links in DOWNLOAD_BATCHES.items():
@@ -192,29 +195,29 @@ else:
                 
                 if os.path.exists(repo_path):
                     prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
-                    print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K", end="", flush=True)
+                    print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     clone_success = True
                 else:
                     prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_name}{COLOR_RESET}"
-                    print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Cloning...{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K", end="", flush=True)
+                    print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Cloning...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     try:
                         p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
                         if p.returncode != 0:
                             err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
-                            print(f"\r❌ Clone failed: {err}{' '*30}\033[K")
+                            print(f"{CLEAR}❌ Clone failed: {err}\033[K")
                         else:
                             prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
-                            print(f"\r{prefix}{' '*40}\033[K", end="", flush=True)
+                            print(f"{CLEAR}{prefix}\033[K", end="", flush=True)
                             clone_success = True
                     except Exception as e:
-                        print(f"\r❌ System error occurred: {e}{' '*30}\033[K")
+                        print(f"{CLEAR}❌ System error occurred: {e}\033[K")
                 
                 if clone_success:
                     if args.req:
                         req_file = os.path.join(repo_path, "requirements.txt")
                         if os.path.exists(req_file) and os.path.getsize(req_file) > 0:
                             req_prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
-                            print(f"\r{req_prefix} {COLOR_OK}[{COLOR_RESET}Installing reqs...{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K", end="", flush=True)
+                            print(f"{CLEAR}{req_prefix} {COLOR_OK}[{COLOR_RESET}Installing reqs...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                             try:
                                 req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
                                 if req_p.returncode == 0: 
@@ -238,7 +241,7 @@ else:
                                         pkg_info = f" {COLOR_OK}[{COLOR_RESET}{pkg_str}{COLOR_OK}]{COLOR_RESET}"
 
                                     success_prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
-                                    print(f"\r{success_prefix} {COLOR_OK}[{COLOR_RESET}Reqs installed{COLOR_OK}]{COLOR_RESET}{pkg_info}{' '*20}\033[K", end="", flush=True)
+                                    print(f"{CLEAR}{success_prefix} {COLOR_OK}[{COLOR_RESET}Reqs installed{COLOR_OK}]{COLOR_RESET}{pkg_info}\033[K", end="", flush=True)
                                 else:
                                     err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
                                     print(f"\n❌ Reqs failed: {err_lines[-1] if err_lines else 'Unknown'}")
@@ -283,7 +286,7 @@ else:
                     if fn.lower().endswith('.zip'):
                         extract_zip(file_path, folder, args.zip, prefix)
                     else:
-                        print(f"\r{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}{' '*30}\033[K")
+                        print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}\033[K")
                     download_success = True
                     break
 
@@ -331,8 +334,8 @@ else:
                                 
                                 prefix = f"{COLOR_OK}◉{COLOR_RESET} {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}"
                                 
-                                # Overwrite line cleanly using \r, padding, and \033[K (clear to end of line)
-                                print(f"\r{prefix} {aria_out}{' ' * 30}\033[K", end="", flush=True)
+                                # Overwrite line cleanly using \r, massive wipe padding, and \033[K
+                                print(f"{CLEAR}{prefix} {aria_out}\033[K", end="", flush=True)
                     p.wait()
                     
                     if p.returncode == 0:
@@ -340,7 +343,7 @@ else:
                         if fn.lower().endswith('.zip'):
                             extract_zip(file_path, folder, args.zip, prefix)
                         else:
-                            print(f"\r{prefix}{' ' * 40}\033[K")
+                            print(f"{CLEAR}{prefix}\033[K")
                         download_success = True
                         break # Success! Break out of the token retry loop
                     else:
