@@ -1,14 +1,14 @@
 import os, subprocess, requests, re, argparse, shutil, zipfile
 from collections import defaultdict
 
-COLOR_FN = '\033[38;5;231m' # 256-color Pure White (Bypasses Kaggle grey override)
-COLOR_OK = '\033[95m' # Magenta
-COLOR_DIR = '\033[93m'
-COLOR_ERR = '\033[91m'
+COLOR_FN = '\033[38;5;231m' # Pure White
+COLOR_OK = '\033[38;5;207m' # Bright Magenta
+COLOR_DIR = '\033[38;5;226m' # Bright Yellow
+COLOR_ERR = '\033[38;5;196m' # Bright Red
 COLOR_RESET = '\033[0m'
-COLOR_WARN = '\033[93m' # Yellow
-COLOR_UNIT = '\033[95m' # Added color for units
-COLOR_SUCCESS = '\033[92m' # Green
+COLOR_WARN = '\033[38;5;226m' # Bright Yellow
+COLOR_UNIT = '\033[38;5;207m' # Bright Magenta
+COLOR_SUCCESS = '\033[38;5;82m' # Bright Green
 
 # Robust line wipe to prevent leftover characters in Kaggle
 CLEAR = '\r' + ' ' * 150 + '\r'
@@ -35,6 +35,10 @@ VAR_REGEX = re.compile(r'\{([^}]+)\}')
 
 def resolve_vars(text):
     return VAR_REGEX.sub(lambda m: str(user_ns.get(m.group(1), m.group(0))), text)
+
+def c_path(text):
+    """Colors paths white, but makes all '/' characters bright green."""
+    return f"{COLOR_FN}{str(text).replace('/', f'{COLOR_SUCCESS}/{COLOR_FN}')}{COLOR_RESET}"
 
 DOWNLOAD_BATCHES = defaultdict(list)
 current_dir = "downloads"
@@ -156,7 +160,8 @@ def run_upload():
             print(f"\n❌ Failed to create repo: {e}")
             return
 
-    print(f"💦 Uploading to {COLOR_FN}{repo_id}/{remote_folder if remote_folder else 'root'}{COLOR_RESET}...")
+    upload_dest = f"{repo_id}/{remote_folder if remote_folder else 'root'}"
+    print(f"💦 Uploading to {c_path(upload_dest)}...")
     
     try:
         api.upload_folder(
@@ -194,11 +199,11 @@ else:
                 clone_success = False
                 
                 if os.path.exists(repo_path):
-                    prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                    prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {c_path(repo_path)}"
                     print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Already exists{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     clone_success = True
                 else:
-                    prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_name}{COLOR_RESET}"
+                    prefix = f"{COLOR_OK}◩{COLOR_RESET} {c_path(repo_name)}"
                     print(f"{CLEAR}{prefix} {COLOR_OK}[{COLOR_RESET}Cloning...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                     try:
                         p = subprocess.run(["git", "clone", url], cwd=folder, capture_output=True, text=True)
@@ -206,7 +211,7 @@ else:
                             err = p.stderr.strip().split('\n')[-1] if p.stderr else "Unknown error"
                             print(f"{CLEAR}❌ Clone failed: {err}\033[K")
                         else:
-                            prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                            prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {c_path(repo_path)}"
                             print(f"{CLEAR}{prefix}\033[K", end="", flush=True)
                             clone_success = True
                     except Exception as e:
@@ -216,7 +221,7 @@ else:
                     if args.req:
                         req_file = os.path.join(repo_path, "requirements.txt")
                         if os.path.exists(req_file) and os.path.getsize(req_file) > 0:
-                            req_prefix = f"{COLOR_OK}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                            req_prefix = f"{COLOR_OK}◩{COLOR_RESET} {c_path(repo_path)}"
                             print(f"{CLEAR}{req_prefix} {COLOR_OK}[{COLOR_RESET}Installing reqs...{COLOR_OK}]{COLOR_RESET}\033[K", end="", flush=True)
                             try:
                                 req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
@@ -240,7 +245,7 @@ else:
                                         pkg_str = ", ".join(installed_pkgs)
                                         pkg_info = f" {COLOR_OK}[{COLOR_RESET}{pkg_str}{COLOR_OK}]{COLOR_RESET}"
 
-                                    success_prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {COLOR_FN}{repo_path}{COLOR_RESET}"
+                                    success_prefix = f"{COLOR_SUCCESS}◩{COLOR_RESET} {c_path(repo_path)}"
                                     print(f"{CLEAR}{success_prefix} {COLOR_OK}[{COLOR_RESET}Reqs installed{COLOR_OK}]{COLOR_RESET}{pkg_info}\033[K", end="", flush=True)
                                 else:
                                     err_lines = [line.strip() for line in req_p.stderr.split('\n') if line.strip()]
@@ -282,7 +287,7 @@ else:
                 file_path = os.path.join(folder, fn)
                 
                 if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
-                    prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {COLOR_FN}{file_path}{COLOR_RESET}"
+                    prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {c_path(file_path)}"
                     if fn.lower().endswith('.zip'):
                         extract_zip(file_path, folder, args.zip, prefix)
                     else:
@@ -332,14 +337,14 @@ else:
                                     # Wrap entire aria output in colored brackets
                                     aria_out = f"{COLOR_OK}[{COLOR_RESET}{aria_out}{COLOR_OK}]{COLOR_RESET}"
                                 
-                                prefix = f"{COLOR_OK}◉{COLOR_RESET} {COLOR_FN}{fn}{COLOR_RESET}{attempt_str}"
+                                prefix = f"{COLOR_OK}◉{COLOR_RESET} {c_path(fn)}{attempt_str}"
                                 
                                 # Overwrite line cleanly using \r, massive wipe padding, and \033[K
                                 print(f"{CLEAR}{prefix} {aria_out}\033[K", end="", flush=True)
                     p.wait()
                     
                     if p.returncode == 0:
-                        prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {COLOR_FN}{file_path}{COLOR_RESET}"
+                        prefix = f"{COLOR_SUCCESS}◉{COLOR_RESET} {c_path(file_path)}"
                         if fn.lower().endswith('.zip'):
                             extract_zip(file_path, folder, args.zip, prefix)
                         else:
