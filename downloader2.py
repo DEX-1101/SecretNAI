@@ -77,12 +77,9 @@ class DownloaderUI:
         self.last_update = 0
         self.update_interval = 0.2
         self.token_info = ""
+        self._displayed = False
 
         if self.is_notebook:
-            try:
-                display(HTML(""), display_id=self.display_id)
-            except Exception:
-                pass
             self._render()
             
     def add_error(self, context, reason, code=None):
@@ -249,21 +246,16 @@ class DownloaderUI:
         """
 
         if self.is_notebook:
-            is_colab = False
-            try:
-                is_colab = 'google.colab' in str(get_ipython())
-            except Exception: 
-                pass
-            
-            if is_colab:
-                if not hasattr(self, '_displayed'):
-                    display(HTML(html_content), display_id=self.display_id)
-                    self._displayed = True
-                else:
-                    display(HTML(html_content), display_id=self.display_id, update=True)
+            if not self._displayed:
+                display(HTML(html_content), display_id=self.display_id)
+                self._displayed = True
             else:
-                clear_output(wait=True)
-                display(HTML(html_content))
+                try:
+                    display(HTML(html_content), display_id=self.display_id, update=True)
+                except Exception:
+                    # Fallback only for extremely old Jupyter kernels
+                    clear_output(wait=True)
+                    display(HTML(html_content))
 
 
 def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
