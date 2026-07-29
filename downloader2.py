@@ -444,7 +444,12 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
                 ui.update_status("Downloading")
 
-                cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
+                cmd = [
+                    "aria2c", "--console-log-level=error", "--summary-interval=1", 
+                    "-c", "-x", "16", "-s", "16", "-k", "50M", 
+                    "--file-allocation=none", "--disable-ipv6=true", 
+                    "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn
+                ]
                 if furl == test_url and is_hf and current_token: cmd.append(f"--header=Authorization: Bearer {current_token}")
                 cmd.append(furl)
                 
@@ -488,8 +493,13 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         if zip_pwd: z.setpassword(zip_pwd.encode('utf-8'))
                         infos = z.infolist()
                         total_items = len(infos)
+                        
+                        # CPU Optimization: Throttle UI updates on massive ZIP files
+                        update_freq = max(1, total_items // 100)
+                        
                         for i, info in enumerate(infos, 1):
-                            ui.update_progress((i/total_items) * 100, "-", "-", detail_text=info.filename, file_size=str(total_items), current_size=str(i))
+                            if i % update_freq == 0 or i == total_items:
+                                ui.update_progress((i/total_items) * 100, "-", "-", detail_text=info.filename[:45], file_size=str(total_items), current_size=str(i))
                             z.extract(info, folder)
                     ui.detail_text = ""
                     ui.add_history(f"{fn} ({total_items} files)", "success")
