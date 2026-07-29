@@ -1,6 +1,9 @@
 import os, subprocess, requests, re, argparse, shutil, zipfile, html, time, uuid
 from collections import defaultdict
-from IPython.display import display, HTML
+from IPython.display import display, HTML, clear_output
+import warnings
+
+warnings.filterwarnings("ignore")
 
 try:
     from google.colab import output
@@ -68,13 +71,24 @@ class DownloaderUI:
         self.speed = ""
         self.eta = ""
         self.history = []
+        self.errors = []
         self.is_finished = False
         self.last_update = 0
         self.update_interval = 0.2
+        self.token_info = ""
 
         if self.is_notebook:
-            display(HTML(""), display_id=self.display_id)
+            if IN_COLAB:
+                display(HTML(""), display_id=self.display_id)
             self._render()
+            
+    def add_error(self, context, reason, code=None):
+        self.errors.append({"context": context, "reason": reason, "code": code})
+        self._render()
+
+    def set_token(self, token_text):
+        self.token_info = token_text
+        self._render()
 
     def update_status(self, text):
         self.status = text
@@ -85,6 +99,7 @@ class DownloaderUI:
         self.detail_text = ""
         self.file_size = ""
         self.current_size = ""
+        self.token_info = ""
         if increment:
             self.file_idx += 1
         self.pct = 0.0
@@ -165,7 +180,12 @@ class DownloaderUI:
             
             queue_badge = f'<span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px;">{self.file_idx} / {self.total_files}</span>' if self.total_files > 0 else ""
             status_pill = f'<span style="background: {status_color}; color: #111; padding: 2px 6px; font-weight: 600;">{html.escape(self.status)}</span>'
-            size_badge = f'<span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px; margin-left: 8px; font-size: 11px; font-weight: bold;">{html.escape(display_size)}</span>' if display_size else ""
+            token_badge = f'<span style="background: #3730a3; color: #e0e7ff; padding: 2px 6px; margin-left: 6px; font-weight: bold;">{html.escape(self.token_info)}</span>' if self.token_info else ""
+            
+            size_badge = ""
+            if display_size and self.status != "Extracting":
+                size_badge = f'<span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px; margin-left: 8px; font-size: 11px; font-weight: bold;">{html.escape(display_size)}</span>'
+                
             detail_badge = f'<span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px; margin-left: 8px; font-size: 11px; font-weight: bold;">{html.escape(self.detail_text)}</span>' if self.detail_text else ""
             
             pb_html = f"""
@@ -181,7 +201,7 @@ class DownloaderUI:
                 </div>
             </div>
             <div style="display: flex; gap: 6px; font-size: 11px; margin-top: 6px;">
-                {status_pill}
+                {status_pill}{token_badge}
                 <span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px;">{html.escape(display_speed)}</span>
                 <span style="background: #2a2a2a; color: #e2e2e2; padding: 2px 6px;">{html.escape(self.eta)}</span>
                 {queue_badge}
@@ -193,6 +213,27 @@ class DownloaderUI:
         if self.status and not (self.current_file and not self.is_finished):
             header_html = f'<div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-bottom: {6 if hist_html else 0}px;">{self.status}</div>'
 
+        err_html = ""
+        if self.errors:
+            err_items = []
+            for err in self.errors:
+                code_str = f" <span style='opacity: 0.7;'>(Code: {err['code']})</span>" if err['code'] is not None else ""
+                err_items.append(
+                    f"<div style='margin-bottom: 6px; display: flex; align-items: start; gap: 8px;'>"
+                    f"<span style='background: rgba(248, 113, 113, 0.15); border: 1px solid rgba(248, 113, 113, 0.3); color: #f87171; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 10px; white-space: nowrap;'>{html.escape(err['context'])}</span>"
+                    f"<span style='color: #fecaca; font-size: 11px; line-height: 1.4; padding-top: 1px;'>{html.escape(str(err['reason']))}{code_str}</span>"
+                    f"</div>"
+                )
+            err_html = f"""
+            <div style="margin-top: 12px; padding: 12px; background: #1a1111; border: 1px solid #451a1a; border-radius: 6px; font-size: 11px;">
+                <div style="font-weight: bold; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; color: #ef4444; font-size: 12px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    Error
+                </div>
+                {''.join(err_items)}
+            </div>
+            """
+
         html_content = f"""
         <div style="font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, sans-serif;
                     background-color: #181818; border: 1px solid #2e2e2e; padding: 10px 14px; 
@@ -200,17 +241,90 @@ class DownloaderUI:
             {header_html}
             {pb_html}
             {hist_html}
+            {err_html}
         </div>
         """
 
-        if not hasattr(self, '_displayed'):
-            display(HTML(html_content), display_id=self.display_id)
-            self._displayed = True
+        if IN_COLAB:
+            if not hasattr(self, '_displayed'):
+                display(HTML(html_content), display_id=self.display_id)
+                self._displayed = True
+            else:
+                display(HTML(html_content), display_id=self.display_id, update=True)
         else:
-            display(HTML(html_content), display_id=self.display_id, update=True)
+            clear_output(wait=True)
+            display(HTML(html_content))
 
 
 def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
+    hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
+    civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
+
+    # 1. HANDLE UPLOAD ONLY (Overrides all else)
+    if upload_to:
+        local_folder_test = upload_to.split("::")[-2] if upload_to.split("::")[-1].lower() in ['private', 'public'] else upload_to.split("::")[-1]
+        total_files = sum(len(files) for _, _, files in os.walk(local_folder_test)) if os.path.exists(local_folder_test) else 0
+        ui = DownloaderUI(total_files)
+        
+        ui.start_file("HuggingFace Upload", increment=False)
+        ui.update_status("Preparing Upload")
+        
+        parts = upload_to.split("::")
+        is_private = True
+        if parts[-1].lower() in ['private', 'public']:
+            is_private = (parts.pop().lower() == 'private')
+            
+        if len(parts) >= 2:
+            repo_id = parts[0]
+            local_folder = parts[-1]
+            remote_folder = parts[1] if len(parts) == 3 else ""
+            
+            if not hf_tokens: 
+                ui.update_status("Failed")
+                ui.add_error("HF Upload", "HF Token required for upload.")
+            elif not os.path.exists(local_folder): 
+                ui.update_status("Failed")
+                ui.add_error("HF Upload", f"Folder '{local_folder}' not found.")
+            else:
+                try:
+                    from huggingface_hub import HfApi
+                except ImportError:
+                    subprocess.run(["pip", "install", "-q", "huggingface_hub"])
+                    from huggingface_hub import HfApi
+                
+                api = HfApi(token=hf_tokens[0])
+                try:
+                    api.model_info(repo_id)
+                except:
+                    ui.update_status("Creating Repo")
+                    api.create_repo(repo_id=repo_id, private=is_private, exist_ok=True)
+                
+                # Gather files
+                files_to_upload = []
+                for root, _, files in os.walk(local_folder):
+                    for f in files:
+                        files_to_upload.append(os.path.relpath(os.path.join(root, f), local_folder))
+                
+                ui.update_status("Uploading")
+                ui.detail_text = f"Pushing {len(files_to_upload)} files"
+                ui._render()
+                
+                try:
+                    api.upload_folder(folder_path=local_folder, path_in_repo=remote_folder, repo_id=repo_id, repo_type="model")
+                    ui.update_status("Success")
+                    for file_name in files_to_upload:
+                        ui.add_history(file_name, "success")
+                except Exception as e:
+                    ui.add_history("HF Upload", "error")
+                    ui.add_error("HF Upload", str(e))
+        else:
+            ui.update_status("Failed")
+            ui.add_error("Upload Args", "Invalid upload format. Expected: repo_id::[remote_folder]::local_folder[::public/private]")
+
+        ui.finish()
+        return
+
+    # 2. STANDARD DOWNLOAD EXECUTION
     DOWNLOAD_BATCHES = defaultdict(list)
     current_dir = "downloads"
     for line in dl_text.splitlines():
@@ -279,6 +393,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         ui.add_history(repo_name, "success")
                     else:
                         ui.add_history(repo_name, "error")
+                        ui.add_error(repo_name, "Git clone failed", p.returncode if 'p' in locals() else None)
                 
                 if clone_success and req:
                     req_file = os.path.join(repo_path, "requirements.txt")
@@ -288,6 +403,8 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         req_p = subprocess.run(["uv", "pip", "install", "--system", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
                         if req_p.returncode != 0:
                             req_p = subprocess.run(["pip", "install", "-r", "requirements.txt"], cwd=repo_path, capture_output=True, text=True)
+                        if req_p.returncode != 0:
+                            ui.add_error(repo_name, "Requirements installation failed", req_p.returncode)
                 continue
 
             # Standard File Downloads
@@ -320,6 +437,11 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
                 ui.start_file(fn)
 
+                if len(tokens_to_try) > 1:
+                    ui.set_token(f"Token {attempt}/{len(tokens_to_try)}")
+
+                ui.update_status("Downloading")
+
                 cmd = ["aria2c", "--console-log-level=error", "--summary-interval=1", "-c", "-x", "16", "-s", "16", "-k", "1M", "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn]
                 if furl == test_url and is_hf and current_token: cmd.append(f"--header=Authorization: Bearer {current_token}")
                 cmd.append(furl)
@@ -345,8 +467,12 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     if p.returncode == 0:
                         download_success = True
                         break
-                except Exception:
-                    pass
+                    else:
+                        if attempt == len(tokens_to_try):
+                            ui.add_error(fn, "Download failed", p.returncode)
+                except Exception as e:
+                    if attempt == len(tokens_to_try):
+                        ui.add_error(fn, f"System error: {str(e)}")
             
             # ZIP Extraction Logic
             if download_success and fn and fn.lower().endswith('.zip'):
@@ -368,47 +494,14 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 except Exception as e:
                     ui.detail_text = ""
                     ui.add_history(f"{fn} (Zip Error)", "error")
+                    ui.add_error(fn, f"Extraction Error: {str(e)}")
             elif download_success:
                 ui.add_history(fn, "success")
             else:
                 try_name = url.split('/')[-1][:20]
                 ui.add_history(try_name, "error")
-
-    if upload_to:
-        ui.start_file("HuggingFace Upload", increment=False)
-        ui.update_status("Preparing Upload")
-        parts = upload_to.split("::")
-        if len(parts) >= 2:
-            repo_id = parts[0]
-            local_folder = parts[-1]
-            remote_folder = parts[1] if len(parts) == 3 else ""
-            
-            if not hf_tokens: 
-                ui.update_status("HF Token required for upload.")
-            elif not os.path.exists(local_folder): 
-                ui.update_status(f"Folder {local_folder} not found.")
-            else:
-                try:
-                    from huggingface_hub import HfApi
-                except ImportError:
-                    subprocess.run(["pip", "install", "-q", "huggingface_hub"])
-                    from huggingface_hub import HfApi
-                
-                api = HfApi(token=hf_tokens[0])
-                try:
-                    api.model_info(repo_id)
-                except:
-                    ui.update_status("Creating Repo")
-                    api.create_repo(repo_id=repo_id, private=True, exist_ok=True)
-                
-                ui.update_status("Uploading")
-                try:
-                    api.upload_folder(folder_path=local_folder, path_in_repo=remote_folder, repo_id=repo_id, repo_type="model")
-                    ui.add_history("HF Upload", "success")
-                except Exception as e:
-                    ui.add_history("HF Upload", "error")
-        else:
-            ui.update_status("❌ Invalid upload format.")
+                if len(tokens_to_try) > 1:
+                    ui.add_error(try_name, "All provided tokens failed for this file.")
 
     ui.finish()
 
