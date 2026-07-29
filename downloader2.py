@@ -106,6 +106,7 @@ class DownloaderUI:
         self.speed = "..."
         self.eta = "..."
         self.status = "Downloading"
+        
     def update_progress(self, pct, speed, eta, detail_text=None, file_size=None, current_size=None):
         self.pct = pct
         self.speed = speed
@@ -256,7 +257,6 @@ class DownloaderUI:
                     # Fallback only for extremely old Jupyter kernels
                     clear_output(wait=True)
                     display(HTML(html_content))
-
 
 def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
@@ -415,6 +415,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
             tokens_to_try = civitai_tokens if is_civitai and civitai_tokens else (hf_tokens if is_hf and hf_tokens else [""])
             
             download_success = False
+            is_skipped = False
             for attempt, current_token in enumerate(tokens_to_try, 1):
                 test_url = url
                 if is_civitai and current_token and "token=" not in test_url:
@@ -434,6 +435,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     else:
                         ui.file_idx += 1
                         ui.add_history(fn, "skipped")
+                        is_skipped = True
                     download_success = True
                     break
 
@@ -508,7 +510,8 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     ui.add_history(f"{fn} (Zip Error)", "error")
                     ui.add_error(fn, f"Extraction Error: {str(e)}")
             elif download_success:
-                ui.add_history(fn, "success")
+                if not is_skipped:
+                    ui.add_history(fn, "success")
             else:
                 try_name = url.split('/')[-1][:20]
                 ui.add_history(try_name, "error")
