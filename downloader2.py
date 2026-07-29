@@ -6,15 +6,13 @@ import warnings
 warnings.filterwarnings("ignore")
 
 try:
-    from google.colab import output
+    from IPython.display import display, HTML, clear_output
     from IPython import get_ipython
     ipy = get_ipython()
     user_ns = ipy.user_ns if ipy else globals()
-    IN_COLAB = True
 except ImportError:
     user_ns = globals()
-    IN_COLAB = False
-    print("⚠️ Warning: This UI architecture is specifically designed for Google Colab.")
+    print("⚠️ Warning: IPython not found. UI requires a Jupyter/Colab-like environment.")
 
 VAR_REGEX = re.compile(r'\{([^}]+)\}')
 def resolve_vars(text):
@@ -54,12 +52,15 @@ def get_info(url, headers, suppress_err=False):
 
 class DownloaderUI:
     """
-    Unified Dashboard UI for Google Colab based on the requested template.
+    Unified Dashboard UI for Jupyter Environments.
     Displays a history of completed files (checks/crosses) and a single active progress row.
     """
     def __init__(self, total_files):
         self.display_id = "ui_" + uuid.uuid4().hex
-        self.is_notebook = get_ipython() is not None
+        try:
+            self.is_notebook = get_ipython() is not None
+        except NameError:
+            self.is_notebook = False
         self.status = "Initializing..."
         self.current_file = ""
         self.detail_text = ""
@@ -78,8 +79,10 @@ class DownloaderUI:
         self.token_info = ""
 
         if self.is_notebook:
-            if IN_COLAB:
+            try:
                 display(HTML(""), display_id=self.display_id)
+            except Exception:
+                pass
             self._render()
             
     def add_error(self, context, reason, code=None):
@@ -245,15 +248,22 @@ class DownloaderUI:
         </div>
         """
 
-        if IN_COLAB:
-            if not hasattr(self, '_displayed'):
-                display(HTML(html_content), display_id=self.display_id)
-                self._displayed = True
+        if self.is_notebook:
+            is_colab = False
+            try:
+                is_colab = 'google.colab' in str(get_ipython())
+            except Exception: 
+                pass
+            
+            if is_colab:
+                if not hasattr(self, '_displayed'):
+                    display(HTML(html_content), display_id=self.display_id)
+                    self._displayed = True
+                else:
+                    display(HTML(html_content), display_id=self.display_id, update=True)
             else:
-                display(HTML(html_content), display_id=self.display_id, update=True)
-        else:
-            clear_output(wait=True)
-            display(HTML(html_content))
+                clear_output(wait=True)
+                display(HTML(html_content))
 
 
 def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
@@ -505,6 +515,5 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
     ui.finish()
 
-
-if IN_COLAB:
-    start_colab_dl(init_dl_list, args.hf, args.civitai, args.req, args.zip, args.upload_to)
+# Execute directly in any environment
+start_colab_dl(init_dl_list, args.hf, args.civitai, args.req, args.zip, args.upload_to)
