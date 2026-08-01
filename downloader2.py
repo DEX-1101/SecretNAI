@@ -491,24 +491,31 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 ui.eta = "-"
                 ui.update_status("Extracting")
                 try:
-                    with zipfile.ZipFile(file_path, 'r') as z:
-                        if zip_pwd: z.setpassword(zip_pwd.encode('utf-8'))
-                        infos = z.infolist()
-                        total_items = len(infos)
+                    if shutil.which("7z"):
+                        cmd = ["7z", "x"]
+                        if zip_pwd:
+                            cmd.append(f"-p{zip_pwd}")
+                        cmd.extend([f"-o{folder}", "-y", file_path])
+                    else:
+                        cmd = ["unzip", "-o"]
+                        if zip_pwd:
+                            cmd.extend(["-P", zip_pwd])
+                        cmd.extend([file_path, "-d", folder])
+
+                    ext_process = subprocess.run(cmd, capture_output=True, text=True)
+
+                    if ext_process.returncode == 0:
+                        ui.pct = 100.0
+                        ui.detail_text = ""
+                        ui.add_history(f"{fn} (Extracted)", "success")
+                    else:
+                        err_msg = ext_process.stderr.strip() if ext_process.stderr else ext_process.stdout.strip()
+                        raise Exception(err_msg if err_msg else "Incorrect password or corrupted file.")
                         
-                        # CPU Optimization: Throttle UI updates on massive ZIP files
-                        update_freq = max(1, total_items // 100)
-                        
-                        for i, info in enumerate(infos, 1):
-                            if i % update_freq == 0 or i == total_items:
-                                ui.update_progress((i/total_items) * 100, "-", "-", detail_text=info.filename[:45], file_size=str(total_items), current_size=str(i))
-                            z.extract(info, folder)
-                    ui.detail_text = ""
-                    ui.add_history(f"{fn} ({total_items} files)", "success")
                 except Exception as e:
                     ui.detail_text = ""
                     ui.add_history(f"{fn} (Zip Error)", "error")
-                    ui.add_error(fn, f"Extraction Error: {str(e)}")
+                    ui.add_error(fn, f"Extraction Error: {str(e)[:150]}")
             elif download_success:
                 if not is_skipped:
                     ui.add_history(fn, "success")
