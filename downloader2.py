@@ -491,6 +491,15 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 ui.eta = "-"
                 ui.update_status("Extracting")
                 try:
+                    # 1. Dapatkan total file dengan membaca header zip (instan, tanpa dekompresi)
+                    total_items = 0
+                    try:
+                        with zipfile.ZipFile(file_path, 'r') as z:
+                            total_items = len(z.infolist())
+                    except Exception:
+                        pass # Abaikan jika gagal membaca header, progress bar tetap jalan tanpa total
+                    
+                    # 2. Siapkan command ekstrasi
                     if shutil.which("7z"):
                         cmd = ["7z", "x"]
                         if zip_pwd:
@@ -502,15 +511,43 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                             cmd.extend(["-P", zip_pwd])
                         cmd.extend([file_path, "-d", folder])
 
-                    ext_process = subprocess.run(cmd, capture_output=True, text=True)
+                    # 3. Gunakan Popen untuk membaca output command secara real-time
+                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                    
+                    extracted_count = 0
+                    # Batasi pembaruan UI agar tidak lag jika file terlalu banyak
+                    update_freq = max(1, total_items // 100) if total_items > 0 else 10
 
-                    if ext_process.returncode == 0:
+                    for line in p.stdout:
+                        line = line.strip()
+                        if not line: continue
+                        
+                        # Deteksi baris output yang menandakan file sedang diekstrak
+                        if "Extracting" in line or "inflating:" in line or "extracting:" in line:
+                            extracted_count += 1
+                            if extracted_count % update_freq == 0 or extracted_count == total_items:
+                                # Ambil nama file dari baris log terminal
+                                parts = line.split(" ", 1)
+                                detail_name = parts[-1].strip() if len(parts) > 1 else line
+                                
+                                pct = (extracted_count / total_items * 100) if total_items > 0 else 0
+                                ui.update_progress(
+                                    pct, "-", "-", 
+                                    detail_text=detail_name[:45], 
+                                    file_size=str(total_items) if total_items > 0 else "?", 
+                                    current_size=str(extracted_count)
+                                )
+                                
+                    p.wait()
+
+                    if p.returncode == 0:
                         ui.pct = 100.0
                         ui.detail_text = ""
-                        ui.add_history(f"{fn} (Extracted)", "success")
+                        final_count = total_items if total_items > 0 else extracted_count
+                        ui.add_history(f"{fn} ({final_count} files)", "success")
                     else:
-                        err_msg = ext_process.stderr.strip() if ext_process.stderr else ext_process.stdout.strip()
-                        raise Exception(err_msg if err_msg else "Incorrect password or corrupted file.")
+                        err_msg = "Incorrect password or corrupted file."
+                        raise Exception(err_msg)
                         
                 except Exception as e:
                     ui.detail_text = ""
