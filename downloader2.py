@@ -42,13 +42,13 @@ def get_info(url, headers, suppress_err=False):
     try:
         with requests.get(url, headers=headers, stream=True, timeout=15) as r:
             r.raise_for_status()
-            if "/login" in r.url: return None, None
+            if "/login" in r.url: return None, "Authentication required (/login redirect)"
             m = re.search('filename="?([^";]+)"?', r.headers.get("Content-Disposition", ""))
             fn = m.group(1) if m else r.url.split("/")[-1].split("?")[0]
             if "civitai" in url and "." not in fn: fn += ".safetensors"
             return fn, r.url
-    except Exception:
-        return None, None
+    except Exception as e:
+        return None, str(e)
 
 class DownloaderUI:
     """
@@ -210,7 +210,6 @@ class DownloaderUI:
             """
 
         header_html = ""
-        # Hide standalone header text if a file is currently active or if status is completely empty
         if self.status and not (self.current_file and not self.is_finished):
             header_html = f'<div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-bottom: {6 if hist_html else 0}px;">{self.status}</div>'
 
@@ -416,6 +415,9 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
             
             download_success = False
             is_skipped = False
+            fn = None
+            last_err_msg = "Link unreachable"
+            
             for attempt, current_token in enumerate(tokens_to_try, 1):
                 test_url = url
                 if is_civitai and current_token and "token=" not in test_url:
@@ -425,8 +427,11 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 h = {"User-Agent": "Mozilla/5.0"}
                 if auth: h["Authorization"] = auth
                 
+                # Fetch header & check errors
                 fn, furl = get_info(test_url, h, suppress_err=(attempt < len(tokens_to_try)))
-                if not fn: continue
+                if not fn: 
+                    last_err_msg = furl if furl else "Invalid response from server"
+                    continue
 
                 file_path = os.path.join(folder, fn)
                 if os.path.exists(file_path) and not os.path.exists(file_path + ".aria2"):
@@ -490,76 +495,67 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 ui.speed = "-"
                 ui.eta = "-"
                 ui.update_status("Extracting")
+                
                 try:
-                    # 1. Dapatkan total file dengan membaca header zip (instan, tanpa dekompresi)
+                    os.makedirs(folder, exist_ok=True)
                     total_items = 0
-                    try:
-                        with zipfile.ZipFile(file_path, 'r') as z:
-                            total_items = len(z.infolist())
-                    except Exception:
-                        pass # Abaikan jika gagal membaca header, progress bar tetap jalan tanpa total
                     
-                    # 2. Siapkan command ekstrasi
+                    # Pre-scan jumlah file menggunakan zipfile untuk UI Progress Bar
+                    with zipfile.ZipFile(file_path, 'r') as z:
+                        total_items = len(z.infolist())
+                        
+                    # Eksekusi ekstraksi dengan 7z atau unzip
                     if shutil.which("7z"):
-                        cmd = ["7z", "x"]
+                        cmd = ["7z", "x", "-y"]
                         if zip_pwd:
                             cmd.append(f"-p{zip_pwd}")
-                        cmd.extend([f"-o{folder}", "-y", file_path])
+                        cmd.extend([f"-o{folder}", file_path])
+                        progress_regex = r"Extracting\s+(.*)"
                     else:
                         cmd = ["unzip", "-o"]
                         if zip_pwd:
                             cmd.extend(["-P", zip_pwd])
                         cmd.extend([file_path, "-d", folder])
+                        progress_regex = r"inflating:\s+(.*)"
 
-                    # 3. Gunakan Popen untuk membaca output command secara real-time
                     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                    
                     extracted_count = 0
-                    # Batasi pembaruan UI agar tidak lag jika file terlalu banyak
-                    update_freq = max(1, total_items // 100) if total_items > 0 else 10
-
+                    
+                    # Baca proses per baris
                     for line in p.stdout:
-                        line = line.strip()
-                        if not line: continue
-                        
-                        # Deteksi baris output yang menandakan file sedang diekstrak
-                        if "Extracting" in line or "inflating:" in line or "extracting:" in line:
+                        match = re.search(progress_regex, line)
+                        if match:
                             extracted_count += 1
-                            if extracted_count % update_freq == 0 or extracted_count == total_items:
-                                # Ambil nama file dari baris log terminal
-                                parts = line.split(" ", 1)
-                                detail_name = parts[-1].strip() if len(parts) > 1 else line
-                                
-                                pct = (extracted_count / total_items * 100) if total_items > 0 else 0
-                                ui.update_progress(
-                                    pct, "-", "-", 
-                                    detail_text=detail_name[:45], 
-                                    file_size=str(total_items) if total_items > 0 else "?", 
-                                    current_size=str(extracted_count)
-                                )
-                                
-                    p.wait()
+                            current_item = match.group(1).strip()
+                            # Throttle UI update supaya tidak lag
+                            if extracted_count % max(1, total_items // 100) == 0 or extracted_count == total_items:
+                                ui.update_progress((extracted_count/total_items)*100 if total_items > 0 else 0, "-", "-", 
+                                                   detail_text=current_item[:45], file_size=str(total_items), current_size=str(extracted_count))
 
+                    p.wait()
                     if p.returncode == 0:
                         ui.pct = 100.0
                         ui.detail_text = ""
-                        final_count = total_items if total_items > 0 else extracted_count
-                        ui.add_history(f"{fn} ({final_count} files)", "success")
+                        ui.add_history(f"{fn} ({total_items} files)", "success")
                     else:
-                        err_msg = "Incorrect password or corrupted file."
-                        raise Exception(err_msg)
+                        raise Exception(f"Process exited with code {p.returncode}. Wrong password or corrupted file.")
                         
                 except Exception as e:
                     ui.detail_text = ""
                     ui.add_history(f"{fn} (Zip Error)", "error")
                     ui.add_error(fn, f"Extraction Error: {str(e)[:150]}")
+            
             elif download_success:
                 if not is_skipped:
                     ui.add_history(fn, "success")
             else:
-                try_name = url.split('/')[-1][:20]
+                # Memastikan error tidak luput
+                try_name = fn if fn else url.split('/')[-1][:20]
                 ui.add_history(try_name, "error")
-                if len(tokens_to_try) > 1:
+                
+                if not fn:
+                    ui.add_error(try_name, f"Failed to connect: {last_err_msg}")
+                elif len(tokens_to_try) > 1:
                     ui.add_error(try_name, "All provided tokens failed for this file.")
 
     ui.finish()
