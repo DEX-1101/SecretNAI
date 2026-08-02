@@ -584,7 +584,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     if p_ext.returncode == 0:
                         ui.pct = 100.0
                         ui.detail_text = ""
-                        ui.add_history(f"{fn} (Extracted)", "success")
+                        ui.add_history(f"{fn} ({total_items} files)", "success")
                     else:
                         raise Exception("Incorrect password or corrupted zip file.")
                         
