@@ -26,6 +26,7 @@ VAR_REGEX = re.compile(r'\{([^}]+)\}')
 def resolve_vars(text):
     return VAR_REGEX.sub(lambda m: str(user_ns.get(m.group(1), m.group(0))), text)
 
+# Argparse setup (Used to populate default values in the UI)
 parser = argparse.ArgumentParser()
 parser.add_argument("--hf", default="", help="HuggingFace API token(s)")
 parser.add_argument("--civitai", default="", help="Civitai API token(s)")
@@ -125,7 +126,7 @@ class DownloaderUI:
 
     def add_history(self, name, status_type):
         self.history.append((name, status_type))
-        self.current_file = "" 
+        self.current_file = "" # Clear current so progress bar hides until next file
         self.detail_text = ""
         self._render()
 
@@ -138,7 +139,7 @@ class DownloaderUI:
     def _render(self):
         if not self.is_notebook: return
 
-        status_color = "#4ade80" 
+        status_color = "#4ade80" # Default Green
         if "Error" in self.status or "❌" in self.status or "Failed" in self.status:
             status_color = "#f87171"
         elif "Skipping" in self.status or "⚠️" in self.status or "Already" in self.status or "Extracted" in self.status:
@@ -211,6 +212,7 @@ class DownloaderUI:
             """
 
         header_html = ""
+        # Hide standalone header text if a file is currently active or if status is completely empty
         if self.status and not (self.current_file and not self.is_finished):
             header_html = f'<div style="font-size: 12px; font-weight: 500; color: {status_color}; margin-bottom: {6 if hist_html else 0}px;">{self.status}</div>'
 
@@ -254,6 +256,7 @@ class DownloaderUI:
                 try:
                     display(HTML(html_content), display_id=self.display_id, update=True)
                 except Exception:
+                    # Fallback only for extremely old Jupyter kernels
                     clear_output(wait=True)
                     display(HTML(html_content))
 
@@ -300,6 +303,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     ui.update_status("Creating Repo")
                     api.create_repo(repo_id=repo_id, private=is_private, exist_ok=True)
                 
+                # Gather files
                 files_to_upload = []
                 for root, _, files in os.walk(local_folder):
                     for f in files:
@@ -324,34 +328,40 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
         ui.finish()
         return
 
+    # 2. STANDARD DOWNLOAD EXECUTION
     DOWNLOAD_BATCHES = defaultdict(list)
     current_dir = "downloads"
-    
     for line in dl_text.splitlines():
         line = line.strip()
         if not line or line.startswith('#'): continue
         
-        # 1. Resolve variables like {model_dir} to their actual paths
+        # Resolve variables and clean up accidental quotation marks from folder names
         line = resolve_vars(line)
         
-        # 2. Separate links and folders
         if line.startswith('http'): 
             DOWNLOAD_BATCHES[current_dir].append(line)
         else:
             # If not a URL, it is automatically treated as a folder path
-            current_dir = line
+            current_dir = line.strip('"\'')
 
     total_files = sum(len(links) for links in DOWNLOAD_BATCHES.values())
+    
+    # Initialize the new minimalist UI
     ui = DownloaderUI(total_files)
 
     if not DOWNLOAD_BATCHES and not upload_to:
         ui.update_status("No download links provided.")
         return
 
+    # Check for aria2c engine and safeguard root installation
     if DOWNLOAD_BATCHES and not shutil.which("aria2c"):
         ui.update_status("Installing aria2c...")
-        subprocess.run("apt-get install -y -qq aria2", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        ui.update_status("Aria2 engine ready")
+        if os.geteuid() == 0:
+            subprocess.run("apt-get update -qq && apt-get install -y -qq aria2", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ui.update_status("Aria2 engine ready")
+        else:
+            ui.add_error("System", "aria2c is missing and cannot install without root (sudo). Downloads may fail.")
+            ui.update_status("Ready")
 
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
     civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
@@ -361,6 +371,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
         os.makedirs(folder, exist_ok=True)
         
         for url in links:
+            # Handle Git Repositories
             if "github.com" in url and not any(x in url for x in ["/releases/download/", "/raw/", "/blob/"]):
                 repo_name = [p for p in url.split("/") if p][-1].replace(".git", "")
                 repo_path = os.path.join(folder, repo_name)
@@ -375,11 +386,13 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     
                     clone_success = False
                     try:
+                        # Use Popen to stream git progress in real-time
                         cmd = ["git", "clone", "--progress", url]
                         p = subprocess.Popen(cmd, cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                         for line in p.stdout:
                             clean_line = line.strip()
                             if clean_line:
+                                # Git uses \r to rewrite terminal lines, split it to get the latest status chunk
                                 parts = clean_line.split('\r')
                                 last_part = parts[-1].strip()
                                 if last_part:
@@ -408,6 +421,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                             ui.add_error(repo_name, "Requirements installation failed", req_p.returncode)
                 continue
 
+            # Standard File Downloads
             is_civitai = "civitai" in url.lower()
             is_hf = "huggingface" in url.lower()
             tokens_to_try = civitai_tokens if is_civitai and civitai_tokens else (hf_tokens if is_hf and hf_tokens else [""])
@@ -424,10 +438,11 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 if auth: h["Authorization"] = auth
                 
                 # Fetch header & check errors
-                fn, furl, err_msg = get_info(test_url, h, suppress_err=(attempt < len(tokens_to_try)))
+                fn, furl, err_msg = get_info(test_url, h)
                 
                 if not fn:
-                    if not suppress_err:
+                    # Only show error if we've exhausted all token attempts
+                    if attempt == len(tokens_to_try):
                         try_name = url.split('/')[-1][:20]
                         ui.add_history(try_name, "error")
                         ui.add_error(try_name, f"Fetch Error: {err_msg}")
@@ -488,6 +503,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     if attempt == len(tokens_to_try):
                         ui.add_error(fn, f"System error: {str(e)}")
             
+            # ZIP Extraction Logic
             if download_success and fn and fn.lower().endswith('.zip'):
                 ui.current_file = fn
                 ui.pct = 0.0
@@ -500,36 +516,44 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     total_items = 1
                     
                     try:
+                        # Pre-scan header for total files count (Instan bahkan pada file enkripsi)
                         with zipfile.ZipFile(file_path, 'r') as z:
                             if zip_pwd: z.setpassword(zip_pwd.encode('utf-8'))
-                            infos = z.infolist()
-                            total_items = len(infos)
+                            total_items = len(z.infolist())
                     except Exception:
-                        pass
+                        pass # Ignore if header is unreadable
                     
                     use_7z = shutil.which("7z") is not None
+                    use_unzip = shutil.which("unzip") is not None
                     
                     if use_7z:
                         cmd = ["7z", "x"]
-                        if zip_pwd:
-                            cmd.append(f"-p{zip_pwd}")
+                        if zip_pwd: cmd.append(f"-p{zip_pwd}")
                         cmd.extend([f"-o{folder}", "-y", file_path])
-                    else:
+                    elif use_unzip:
                         cmd = ["unzip", "-o"]
-                        if zip_pwd:
-                            cmd.extend(["-P", zip_pwd])
+                        if zip_pwd: cmd.extend(["-P", zip_pwd])
                         cmd.extend([file_path, "-d", folder])
+                    else:
+                        raise Exception("Neither 7z nor unzip is installed on this system.")
 
+                    # Run native extraction and stream output line-by-line
                     p_ext = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                     
                     extracted_count = 0
                     for line in p_ext.stdout:
-                        if use_7z and "Extracting" in line and "archive" not in line.lower():
+                        line_lower = line.lower()
+                        # Deteksi baris log spesifik untuk kalkulasi
+                        if use_7z and "extracting" in line_lower and "archive" not in line_lower:
                             extracted_count += 1
-                            ui.update_progress(min(99.9, (extracted_count/total_items) * 100), "-", "-", detail_text=line.strip()[:45], file_size=str(total_items), current_size=str(extracted_count))
-                        elif not use_7z and ("inflating:" in line or "extracting:" in line):
+                        elif not use_7z and ("inflating:" in line_lower or "extracting:" in line_lower):
                             extracted_count += 1
-                            ui.update_progress(min(99.9, (extracted_count/total_items) * 100), "-", "-", detail_text=line.strip()[:45], file_size=str(total_items), current_size=str(extracted_count))
+                            
+                        if extracted_count > 0:
+                            # Capping progress safely
+                            safe_count = min(extracted_count, total_items) if total_items > 1 else extracted_count
+                            safe_pct = min(99.9, (safe_count / total_items) * 100) if total_items > 1 else 50.0
+                            ui.update_progress(safe_pct, "-", "-", detail_text=line.strip()[:45], file_size=str(total_items), current_size=str(safe_count))
                             
                     p_ext.wait()
 
@@ -538,16 +562,18 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         ui.detail_text = ""
                         ui.add_history(f"{fn} (Extracted)", "success")
                     else:
-                        raise Exception("Incorrect password or corrupted zip file.")
+                        raise Exception("Incorrect password, corrupted file, or unsupported encryption.")
                         
                 except Exception as e:
                     ui.detail_text = ""
                     ui.add_history(f"{fn} (Zip Error)", "error")
                     ui.add_error(fn, f"Extraction Error: {str(e)}")
+                    
             elif download_success:
                 if not is_skipped:
                     ui.add_history(fn, "success")
             else:
+                # Catch-all if download completely failed across all tokens
                 try_name = url.split('/')[-1][:20]
                 if try_name not in [h[0] for h in ui.history]:
                     ui.add_history(try_name, "error")
@@ -556,6 +582,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
     ui.finish()
 
+# Populate initial download list from Colab notebook variables
 init_dl_list = user_ns.get('DOWNLOAD_LIST', '')
 if not init_dl_list:
     raw_batches = user_ns.get('DOWNLOAD_BATCHES', {})
@@ -575,8 +602,12 @@ try:
     
     @register_cell_magic
     def download(line, cell):
-        cell_args, _ = parser.parse_known_args(shlex.split(line))
-        start_colab_dl(cell, cell_args.hf, cell_args.civitai, cell_args.req, cell_args.zip, cell_args.upload_to)
+        try:
+            cell_args, _ = parser.parse_known_args(shlex.split(line))
+            start_colab_dl(cell, cell_args.hf, cell_args.civitai, cell_args.req, cell_args.zip, cell_args.upload_to)
+        except ValueError as e:
+            # Handle shlex syntax errors gracefully (e.g. unclosed quotes)
+            print(f"⚠️ Cell Magic Error: {e} (Please check for unclosed quotation marks in your arguments)")
 except Exception:
     pass
 
