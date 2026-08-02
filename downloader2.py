@@ -516,7 +516,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     total_items = 1
                     
                     try:
-                        # Pre-scan header for total files count (Instan bahkan pada file enkripsi)
+                        # Pre-scan header for total files count (Instant even on encrypted files)
                         with zipfile.ZipFile(file_path, 'r') as z:
                             if zip_pwd: z.setpassword(zip_pwd.encode('utf-8'))
                             total_items = len(z.infolist())
@@ -527,9 +527,10 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     use_unzip = shutil.which("unzip") is not None
                     
                     if use_7z:
-                        cmd = ["7z", "x"]
+                        # -bb1 shows extracted files in log, -bd disables progress indicator
+                        cmd = ["7z", "x", "-y", "-bb1", "-bd"]
                         if zip_pwd: cmd.append(f"-p{zip_pwd}")
-                        cmd.extend([f"-o{folder}", "-y", file_path])
+                        cmd.extend([f"-o{folder}", file_path])
                     elif use_unzip:
                         cmd = ["unzip", "-o"]
                         if zip_pwd: cmd.extend(["-P", zip_pwd])
@@ -537,23 +538,46 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     else:
                         raise Exception("Neither 7z nor unzip is installed on this system.")
 
-                    # Run native extraction and stream output line-by-line
+                    # Run native extraction and stream output line-by-line safely
                     p_ext = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                     
                     extracted_count = 0
-                    for line in p_ext.stdout:
-                        line_lower = line.lower()
-                        # Deteksi baris log spesifik untuk kalkulasi
-                        if use_7z and "extracting" in line_lower and "archive" not in line_lower:
+                    
+                    # iter(readline) is safer for streaming unbuffered output without blocking
+                    for line in iter(p_ext.stdout.readline, ''):
+                        clean_line = line.strip()
+                        if not clean_line: continue
+                        
+                        # Only count lines that actually indicate a file being extracted.
+                        # 7z with -bb1 outputs "- {filename}" for extracted files
+                        # unzip outputs "inflating: {filename}" or "extracting: {filename}"
+                        display_name = ""
+                        
+                        if use_7z and clean_line.startswith("- "):
+                            display_name = clean_line[2:].strip()
                             extracted_count += 1
-                        elif not use_7z and ("inflating:" in line_lower or "extracting:" in line_lower):
+                        elif use_unzip and ("inflating:" in clean_line.lower() or "extracting:" in clean_line.lower()):
+                            # Split by the colon and take the right side, then strip whitespace
+                            parts = clean_line.split(':', 1)
+                            if len(parts) > 1:
+                                display_name = parts[1].strip()
+                            else:
+                                display_name = clean_line
                             extracted_count += 1
-                            
-                        if extracted_count > 0:
-                            # Capping progress safely
+                        
+                        # Only update the UI if we found a valid file name
+                        if display_name:
+                            # Cap progress safely at 99.9% until truly finished
                             safe_count = min(extracted_count, total_items) if total_items > 1 else extracted_count
                             safe_pct = min(99.9, (safe_count / total_items) * 100) if total_items > 1 else 50.0
-                            ui.update_progress(safe_pct, "-", "-", detail_text=line.strip()[:45], file_size=str(total_items), current_size=str(safe_count))
+                            
+                            # Explicitly pass strings to force "current / total" UI format
+                            ui.update_progress(
+                                safe_pct, "-", "-", 
+                                detail_text=display_name[:45], 
+                                file_size=f"{total_items} items", 
+                                current_size=f"{safe_count}"
+                            )
                             
                     p_ext.wait()
 
@@ -562,7 +586,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         ui.detail_text = ""
                         ui.add_history(f"{fn} (Extracted)", "success")
                     else:
-                        raise Exception("Incorrect password, corrupted file, or unsupported encryption.")
+                        raise Exception("Incorrect password or corrupted zip file.")
                         
                 except Exception as e:
                     ui.detail_text = ""
