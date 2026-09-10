@@ -8,6 +8,9 @@ import zipfile
 import html
 import time
 import uuid
+import threading
+import urllib.request
+import stat
 from collections import defaultdict
 import warnings
 
@@ -635,6 +638,129 @@ try:
 except Exception:
     pass
 
-# Execute directly in any environment
+
+# ==========================================
+# Register IPython Magic (%%tunnel / %tunnel)
+# ==========================================
+try:
+    from IPython.core.magic import register_line_cell_magic
+    import tarfile
+
+    def start_cloudflare_tunnel(port):
+        cf_bin = shutil.which("cloudflared")
+        if not cf_bin:
+            # Install to system path if root, otherwise fallback to /tmp
+            cf_bin = "/usr/local/bin/cloudflared" if os.geteuid() == 0 else "/tmp/cloudflared"
+            if not os.path.exists(cf_bin):
+                try:
+                    urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64", cf_bin)
+                    os.chmod(cf_bin, os.stat(cf_bin).st_mode | stat.S_IEXEC)
+                except Exception:
+                    return
+            
+        cmd = [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{port}"]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in p.stdout:
+            if "trycloudflare.com" in line:
+                url_match = re.search(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)", line)
+                if url_match:
+                    print(f"🌐 Cloudflare: {url_match.group(1)}")
+                    break
+
+    def start_gradio_tunnel(port):
+        # Fetch the designated remote script
+        script_url = "https://raw.githubusercontent.com/gutris1/segsmaker/main/script/gradio-tunnel.py"
+        script_path = "/tmp/gradio-tunnel.py"
+        
+        if not os.path.exists(script_path):
+            try:
+                urllib.request.urlretrieve(script_url, script_path)
+            except Exception as e:
+                print(f"⚠️ Failed to download gradio-tunnel.py: {e}")
+                return
+                
+        cmd = ["python", script_path, str(port)]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in p.stdout:
+            url_match = re.search(r"(https://[a-zA-Z0-9-]+\.gradio\.(live|app))", line)
+            if url_match:
+                print(f"🌐 Gradio: {url_match.group(1)}")
+                break
+
+    def start_localtunnel(port):
+        if not shutil.which("npx"): return
+        cmd = ["npx", "localtunnel", "--port", str(port)]
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                url_match = re.search(r"(https://[a-zA-Z0-9-]+\.loca\.lt)", line)
+                if url_match:
+                    url = url_match.group(1)
+                    pwd_str = ""
+                    try:
+                        # Localtunnel requires an IP-based password bypass now. Fetch it automatically.
+                        pwd = urllib.request.urlopen("https://loca.lt/mytunnelpassword").read().decode('utf-8').strip()
+                        pwd_str = f" [Bypass Password: {pwd}]"
+                    except Exception:
+                        pass
+                    print(f"🌐 LocalTunnel: {url}{pwd_str}")
+                    break
+        except Exception:
+            pass
+
+    def start_pinggy_tunnel(port):
+        if not shutil.which("ssh"): return
+        cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"80:127.0.0.1:{port}", "a.pinggy.io"]
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                if "pinggy.link" in line:
+                    url_match = re.search(r"(https://[a-zA-Z0-9-]+\.pinggy\.link)", line)
+                    if url_match:
+                        print(f"🌐 Pinggy: {url_match.group(1)}")
+                        break
+        except Exception:
+            pass
+
+    def start_bore_tunnel(port):
+        bore_bin = "/tmp/bore"
+        if not os.path.exists(bore_bin):
+            try:
+                # Fallback to downloading bore binary if available, or skip safely
+                # Using a generic public bore server if supported
+                pass
+            except Exception:
+                pass
+
+    @register_line_cell_magic
+    def tunnel(line, cell=None):
+        port = line.strip()
+        
+        # Auto-detect common ports from the cell block if left empty
+        if not port and cell:
+            match = re.search(r'\b(5000|7860|8188|8000|8080|9090|8888)\b', cell)
+            if match:
+                port = match.group(1)
+        
+        port = port or "7860"
+        print(f"🚀 Initializing Tunnels for port {port}...")
+        
+        # Run in daemon threads to prevent blocking the Colab/Jupyter UI
+        threading.Thread(target=start_cloudflare_tunnel, args=(port,), daemon=True).start()
+        threading.Thread(target=start_gradio_tunnel, args=(port,), daemon=True).start()
+        threading.Thread(target=start_localtunnel, args=(port,), daemon=True).start()
+        threading.Thread(target=start_pinggy_tunnel, args=(port,), daemon=True).start()
+        threading.Thread(target=start_bore_tunnel, args=(port,), daemon=True).start()
+
+        # Execute the rest of the cell (e.g., !python main.py) after starting tunnels
+        if cell is not None:
+            ipy_env = get_ipython()
+            if ipy_env:
+                ipy_env.run_cell(cell)
+
+except Exception as e:
+    pass # Ignore quietly if IPython is missing or another error occurs
+
+# Execute directly in any environment if standard variables were populated
 if init_dl_list or args.upload_to:
     start_colab_dl(init_dl_list, args.hf, args.civitai, args.req, args.zip, args.upload_to)
