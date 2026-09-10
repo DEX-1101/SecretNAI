@@ -644,52 +644,98 @@ except Exception:
 # ==========================================
 try:
     from IPython.core.magic import register_line_cell_magic
-    import tarfile
+    import threading
+    import urllib.request
+    import stat
+    import shlex
 
-    def start_cloudflare_tunnel(port):
+    # Lock and shared UI state for dynamic, ordered tunnel updates
+    tunnel_ui_lock = threading.Lock()
+
+    def update_tunnel_ui(port, states, display_id):
+        with tunnel_ui_lock:
+            html = f"<div style='font-family: \"Segoe UI\", sans-serif; padding: 14px; background: #1a1b26; border: 1px solid #292e42; border-radius: 8px; color: #a9b1d6; margin-bottom: 15px; max-width: 800px; line-height: 1.6;'>"
+            html += f"<div style='color: #9ece6a; font-weight: bold; margin-bottom: 12px; font-size: 14px; display: flex; align-items: center; gap: 8px;'>🚀 Tunnels active on port <span style='background: #f7768e; color: #15161e; padding: 2px 6px; border-radius: 4px;'>{port}</span></div>"
+            
+            for name, val in states.items():
+                if val.startswith("http"):
+                    # Extract URL to make it uniquely clickable, separate from extra info (like passwords)
+                    url = val.split()[0]
+                    extra = val[len(url):]
+                    val_html = f"<a href='{url}' target='_blank' style='color: #7aa2f7; text-decoration: none; font-weight: bold;'>{url}</a><span style='color: #e0af68; font-size: 12px;'>{extra}</span>"
+                elif "❌" in val or "⚠️" in val:
+                    val_html = f"<span style='color: #f7768e; font-size: 13px;'>{val}</span>"
+                else:
+                    val_html = f"<span style='color: #565f89; font-size: 13px; font-style: italic;'>{val}</span>"
+                    
+                html += f"<div style='display: flex; align-items: baseline; margin-bottom: 6px;'><span style='color: #ff9e64; width: 110px; font-weight: bold; font-size: 13px; flex-shrink: 0;'>{name}</span> {val_html}</div>"
+            html += "</div>"
+            
+            try:
+                display(HTML(html), display_id=display_id, update=True)
+            except Exception:
+                pass
+
+    def start_cloudflare_tunnel(port, states, d_id):
         cf_bin = shutil.which("cloudflared")
         if not cf_bin:
-            # Install to system path if root, otherwise fallback to /tmp
             cf_bin = "/usr/local/bin/cloudflared" if os.geteuid() == 0 else "/tmp/cloudflared"
             if not os.path.exists(cf_bin):
                 try:
                     urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64", cf_bin)
                     os.chmod(cf_bin, os.stat(cf_bin).st_mode | stat.S_IEXEC)
                 except Exception:
+                    states["Cloudflare"] = "❌ Failed to download binary"
+                    update_tunnel_ui(port, states, d_id)
                     return
             
         cmd = [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{port}"]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in p.stdout:
-            if "trycloudflare.com" in line:
-                url_match = re.search(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)", line)
-                if url_match:
-                    print(f"🌐 Cloudflare: {url_match.group(1)}")
-                    break
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                if "trycloudflare.com" in line:
+                    url_match = re.search(r"(https://[a-zA-Z0-9-]+\.trycloudflare\.com)", line)
+                    if url_match:
+                        states["Cloudflare"] = url_match.group(1)
+                        update_tunnel_ui(port, states, d_id)
+                        break
+        except Exception as e:
+            states["Cloudflare"] = f"❌ Error: {e}"
+            update_tunnel_ui(port, states, d_id)
 
-    def start_gradio_tunnel(port):
-        # Fetch the designated remote script
+    def start_gradio_tunnel(port, states, d_id):
         script_url = "https://raw.githubusercontent.com/gutris1/segsmaker/main/script/gradio-tunnel.py"
         script_path = "/tmp/gradio-tunnel.py"
         
         if not os.path.exists(script_path):
             try:
                 urllib.request.urlretrieve(script_url, script_path)
-            except Exception as e:
-                print(f"⚠️ Failed to download gradio-tunnel.py: {e}")
+            except Exception:
+                states["Gradio"] = "❌ Failed to fetch script"
+                update_tunnel_ui(port, states, d_id)
                 return
                 
         cmd = ["python", script_path, str(port)]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in p.stdout:
-            url_match = re.search(r"(https://[a-zA-Z0-9-]+\.gradio\.(live|app))", line)
-            if url_match:
-                print(f"🌐 Gradio: {url_match.group(1)}")
-                break
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                url_match = re.search(r"(https://[a-zA-Z0-9-]+\.gradio\.(live|app))", line)
+                if url_match:
+                    states["Gradio"] = url_match.group(1)
+                    update_tunnel_ui(port, states, d_id)
+                    break
+        except Exception as e:
+            states["Gradio"] = f"❌ Error: {e}"
+            update_tunnel_ui(port, states, d_id)
 
-    def start_localtunnel(port):
-        if not shutil.which("npx"): return
-        cmd = ["npx", "localtunnel", "--port", str(port)]
+    def start_localtunnel(port, states, d_id):
+        if not shutil.which("npx"):
+            states["LocalTunnel"] = "⚠️ NodeJS (npx) not installed"
+            update_tunnel_ui(port, states, d_id)
+            return
+            
+        # The -y flag forces "yes" to automatically install localtunnel without user prompt
+        cmd = ["npx", "-y", "localtunnel", "--port", str(port)]
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in p.stdout:
@@ -698,18 +744,23 @@ try:
                     url = url_match.group(1)
                     pwd_str = ""
                     try:
-                        # Localtunnel requires an IP-based password bypass now. Fetch it automatically.
                         pwd = urllib.request.urlopen("https://loca.lt/mytunnelpassword").read().decode('utf-8').strip()
-                        pwd_str = f" [Bypass Password: {pwd}]"
+                        pwd_str = f"   [Password: {pwd}]"
                     except Exception:
                         pass
-                    print(f"🌐 LocalTunnel: {url}{pwd_str}")
+                    states["LocalTunnel"] = f"{url}{pwd_str}"
+                    update_tunnel_ui(port, states, d_id)
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            states["LocalTunnel"] = f"❌ Error: {e}"
+            update_tunnel_ui(port, states, d_id)
 
-    def start_pinggy_tunnel(port):
-        if not shutil.which("ssh"): return
+    def start_pinggy_tunnel(port, states, d_id):
+        if not shutil.which("ssh"):
+            states["Pinggy"] = "⚠️ SSH not installed"
+            update_tunnel_ui(port, states, d_id)
+            return
+            
         cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"80:127.0.0.1:{port}", "a.pinggy.io"]
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -717,20 +768,12 @@ try:
                 if "pinggy.link" in line:
                     url_match = re.search(r"(https://[a-zA-Z0-9-]+\.pinggy\.link)", line)
                     if url_match:
-                        print(f"🌐 Pinggy: {url_match.group(1)}")
+                        states["Pinggy"] = url_match.group(1)
+                        update_tunnel_ui(port, states, d_id)
                         break
-        except Exception:
-            pass
-
-    def start_bore_tunnel(port):
-        bore_bin = "/tmp/bore"
-        if not os.path.exists(bore_bin):
-            try:
-                # Fallback to downloading bore binary if available, or skip safely
-                # Using a generic public bore server if supported
-                pass
-            except Exception:
-                pass
+        except Exception as e:
+            states["Pinggy"] = f"❌ Error: {e}"
+            update_tunnel_ui(port, states, d_id)
 
     @register_line_cell_magic
     def tunnel(line, cell=None):
@@ -743,24 +786,38 @@ try:
                 port = match.group(1)
         
         port = port or "7860"
-        print(f"🚀 Initializing Tunnels for port {port}...")
         
-        # Run in daemon threads to prevent blocking the Colab/Jupyter UI
-        threading.Thread(target=start_cloudflare_tunnel, args=(port,), daemon=True).start()
-        threading.Thread(target=start_gradio_tunnel, args=(port,), daemon=True).start()
-        threading.Thread(target=start_localtunnel, args=(port,), daemon=True).start()
-        threading.Thread(target=start_pinggy_tunnel, args=(port,), daemon=True).start()
-        threading.Thread(target=start_bore_tunnel, args=(port,), daemon=True).start()
+        display_id = "tunnels_" + uuid.uuid4().hex
+        states = {
+            "Cloudflare": "⏳ Starting...",
+            "Gradio": "⏳ Starting...",
+            "LocalTunnel": "⏳ Starting...",
+            "Pinggy": "⏳ Starting..."
+        }
+        
+        # Initialize placeholder display
+        try:
+            display(HTML("<div>Initializing Tunnels...</div>"), display_id=display_id)
+        except Exception:
+            print(f"🚀 Initializing Tunnels for port {port}...")
+            
+        update_tunnel_ui(port, states, display_id)
+        
+        # Launch daemons
+        threading.Thread(target=start_cloudflare_tunnel, args=(port, states, display_id), daemon=True).start()
+        threading.Thread(target=start_gradio_tunnel, args=(port, states, display_id), daemon=True).start()
+        threading.Thread(target=start_localtunnel, args=(port, states, display_id), daemon=True).start()
+        threading.Thread(target=start_pinggy_tunnel, args=(port, states, display_id), daemon=True).start()
 
-        # Execute the rest of the cell (e.g., !python main.py) after starting tunnels
+        # Run subsequent app
         if cell is not None:
             ipy_env = get_ipython()
             if ipy_env:
                 ipy_env.run_cell(cell)
 
 except Exception as e:
-    pass # Ignore quietly if IPython is missing or another error occurs
+    pass # Ignore quietly if IPython is missing
 
-# Execute directly in any environment if standard variables were populated
+# Execute directly in any environment
 if init_dl_list or args.upload_to:
     start_colab_dl(init_dl_list, args.hf, args.civitai, args.req, args.zip, args.upload_to)
