@@ -648,33 +648,63 @@ try:
     import urllib.request
     import stat
     import shlex
+    import subprocess
+    import os
+    import re
+    import uuid
+    import shutil
 
     # Lock and shared UI state for dynamic, ordered tunnel updates
     tunnel_ui_lock = threading.Lock()
 
     def update_tunnel_ui(port, states, display_id):
         with tunnel_ui_lock:
-            html = f"<div style='font-family: \"Segoe UI\", sans-serif; padding: 14px; background: #1a1b26; border: 1px solid #292e42; border-radius: 8px; color: #a9b1d6; margin-bottom: 15px; max-width: 800px; line-height: 1.6;'>"
-            html += f"<div style='color: #9ece6a; font-weight: bold; margin-bottom: 12px; font-size: 14px; display: flex; align-items: center; gap: 8px;'>🚀 Tunnels active on port <span style='background: #f7768e; color: #15161e; padding: 2px 6px; border-radius: 4px;'>{port}</span></div>"
+            # Windows 11 Dark Mode Theme
+            html = f"""
+            <div style="font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; 
+                        padding: 16px; background: #202020; border: 1px solid #333333; border-radius: 8px; 
+                        color: #ffffff; margin-bottom: 16px; max-width: 800px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                <div style="font-weight: 600; margin-bottom: 16px; font-size: 15px; display: flex; align-items: center; gap: 8px; color: #ffffff;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4cc2ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                    </svg>
+                    Tunnels Active 
+                    <span style="background: #333333; color: #cccccc; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: normal; margin-left: 4px;">Port {port}</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+            """
             
             for name, val in states.items():
                 if val.startswith("http"):
-                    # Extract URL to make it uniquely clickable, separate from extra info (like passwords)
                     url = val.split()[0]
-                    extra = val[len(url):]
-                    val_html = f"<a href='{url}' target='_blank' style='color: #7aa2f7; text-decoration: none; font-weight: bold;'>{url}</a><span style='color: #e0af68; font-size: 12px;'>{extra}</span>"
-                elif "❌" in val or "⚠️" in val:
-                    val_html = f"<span style='color: #f7768e; font-size: 13px;'>{val}</span>"
+                    extra = val[len(url):].strip()
+                    extra_html = f"<span style='color: #a0a0a0; font-size: 12px; margin-left: 8px;'>{extra}</span>" if extra else ""
+                    val_html = f"<a href='{url}' target='_blank' style='color: #4cc2ff; text-decoration: none; font-weight: 500;'>{url}</a>{extra_html}"
+                elif "❌" in val or "⚠️" in val or "Error" in val:
+                    val_html = f"<span style='color: #ff99a4; font-size: 13px;'>{val}</span>"
                 else:
-                    val_html = f"<span style='color: #565f89; font-size: 13px; font-style: italic;'>{val}</span>"
+                    val_html = f"<span style='color: #a0a0a0; font-size: 13px; font-style: italic;'>{val}</span>"
                     
-                html += f"<div style='display: flex; align-items: baseline; margin-bottom: 6px;'><span style='color: #ff9e64; width: 110px; font-weight: bold; font-size: 13px; flex-shrink: 0;'>{name}</span> {val_html}</div>"
-            html += "</div>"
+                html += f"""
+                    <div style="display: flex; align-items: center; padding: 8px 12px; background: #2b2b2b; border-radius: 6px; border: 1px solid #333333;">
+                        <div style="width: 100px; font-weight: 500; font-size: 13px; color: #e0e0e0;">{name}</div>
+                        <div style="flex-grow: 1; font-size: 13px; text-align: left;">{val_html}</div>
+                    </div>
+                """
+                
+            html += "</div></div>"
             
             try:
                 display(HTML(html), display_id=display_id, update=True)
             except Exception:
                 pass
+
+    # Ensures unread daemon output doesn't block threads or leak to standard output
+    def consume_stream(stream):
+        try:
+            for _ in stream: pass
+        except: pass
 
     def start_cloudflare_tunnel(port, states, d_id):
         cf_bin = shutil.which("cloudflared")
@@ -685,7 +715,7 @@ try:
                     urllib.request.urlretrieve("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64", cf_bin)
                     os.chmod(cf_bin, os.stat(cf_bin).st_mode | stat.S_IEXEC)
                 except Exception:
-                    states["Cloudflare"] = "❌ Failed to download binary"
+                    states["Cloudflare"] = "❌ Failed to download"
                     update_tunnel_ui(port, states, d_id)
                     return
             
@@ -698,9 +728,10 @@ try:
                     if url_match:
                         states["Cloudflare"] = url_match.group(1)
                         update_tunnel_ui(port, states, d_id)
+                        threading.Thread(target=consume_stream, args=(p.stdout,), daemon=True).start()
                         break
-        except Exception as e:
-            states["Cloudflare"] = f"❌ Error: {e}"
+        except Exception:
+            states["Cloudflare"] = "❌ Error"
             update_tunnel_ui(port, states, d_id)
 
     def start_gradio_tunnel(port, states, d_id):
@@ -723,21 +754,22 @@ try:
                 if url_match:
                     states["Gradio"] = url_match.group(1)
                     update_tunnel_ui(port, states, d_id)
+                    threading.Thread(target=consume_stream, args=(p.stdout,), daemon=True).start()
                     break
-        except Exception as e:
-            states["Gradio"] = f"❌ Error: {e}"
+        except Exception:
+            states["Gradio"] = "❌ Error"
             update_tunnel_ui(port, states, d_id)
 
     def start_localtunnel(port, states, d_id):
         if not shutil.which("npx"):
-            states["LocalTunnel"] = "⚠️ NodeJS (npx) not installed"
+            states["LocalTunnel"] = "⚠️ NodeJS (npx) missing"
             update_tunnel_ui(port, states, d_id)
             return
             
-        # The -y flag forces "yes" to automatically install localtunnel without user prompt
         cmd = ["npx", "-y", "localtunnel", "--port", str(port)]
         try:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            # Route stderr to DEVNULL so warnings don't pollute your notebook
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             for line in p.stdout:
                 url_match = re.search(r"(https://[a-zA-Z0-9-]+\.loca\.lt)", line)
                 if url_match:
@@ -745,23 +777,24 @@ try:
                     pwd_str = ""
                     try:
                         pwd = urllib.request.urlopen("https://loca.lt/mytunnelpassword").read().decode('utf-8').strip()
-                        pwd_str = f"   [Password: {pwd}]"
+                        pwd_str = f"[Password: {pwd}]"
                     except Exception:
                         pass
-                    states["LocalTunnel"] = f"{url}{pwd_str}"
+                    states["LocalTunnel"] = f"{url} {pwd_str}"
                     update_tunnel_ui(port, states, d_id)
+                    threading.Thread(target=consume_stream, args=(p.stdout,), daemon=True).start()
                     break
-        except Exception as e:
-            states["LocalTunnel"] = f"❌ Error: {e}"
+        except Exception:
+            states["LocalTunnel"] = "❌ Error"
             update_tunnel_ui(port, states, d_id)
 
     def start_pinggy_tunnel(port, states, d_id):
         if not shutil.which("ssh"):
-            states["Pinggy"] = "⚠️ SSH not installed"
+            states["Pinggy"] = "⚠️ SSH missing"
             update_tunnel_ui(port, states, d_id)
             return
             
-        cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"80:127.0.0.1:{port}", "a.pinggy.io"]
+        cmd = ["ssh", "-q", "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-R", f"80:127.0.0.1:{port}", "a.pinggy.io"]
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in p.stdout:
@@ -770,9 +803,10 @@ try:
                     if url_match:
                         states["Pinggy"] = url_match.group(1)
                         update_tunnel_ui(port, states, d_id)
+                        threading.Thread(target=consume_stream, args=(p.stdout,), daemon=True).start()
                         break
-        except Exception as e:
-            states["Pinggy"] = f"❌ Error: {e}"
+        except Exception:
+            states["Pinggy"] = "❌ Error"
             update_tunnel_ui(port, states, d_id)
 
     @register_line_cell_magic
@@ -789,17 +823,17 @@ try:
         
         display_id = "tunnels_" + uuid.uuid4().hex
         states = {
-            "Cloudflare": "⏳ Starting...",
-            "Gradio": "⏳ Starting...",
-            "LocalTunnel": "⏳ Starting...",
-            "Pinggy": "⏳ Starting..."
+            "Cloudflare": "Starting...",
+            "Gradio": "Starting...",
+            "LocalTunnel": "Starting...",
+            "Pinggy": "Starting..."
         }
         
         # Initialize placeholder display
         try:
-            display(HTML("<div>Initializing Tunnels...</div>"), display_id=display_id)
+            display(HTML("<div style='color:#a0a0a0;'>Initializing Tunnels...</div>"), display_id=display_id)
         except Exception:
-            print(f"🚀 Initializing Tunnels for port {port}...")
+            pass
             
         update_tunnel_ui(port, states, display_id)
         
@@ -809,7 +843,7 @@ try:
         threading.Thread(target=start_localtunnel, args=(port, states, display_id), daemon=True).start()
         threading.Thread(target=start_pinggy_tunnel, args=(port, states, display_id), daemon=True).start()
 
-        # Run subsequent app
+        # Run subsequent app safely underneath
         if cell is not None:
             ipy_env = get_ipython()
             if ipy_env:
