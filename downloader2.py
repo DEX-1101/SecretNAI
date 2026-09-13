@@ -366,6 +366,12 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
             ui.add_error("System", "aria2c is missing and cannot install without root (sudo). Downloads may fail.")
             ui.update_status("Ready")
 
+    hf_needs_opt = any("huggingface.co" in link.lower() for links in DOWNLOAD_BATCHES.values() for link in links)
+    if hf_needs_opt:
+        ui.update_status("Initializing Xet & HF-Transfer...")
+        import sys
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "hf-transfer", "hf-xet", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
     civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
 
@@ -469,42 +475,115 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
                 ui.update_status("Downloading")
 
-                cmd = [
-                    "aria2c", "--console-log-level=error", "--summary-interval=1", 
-                    "-c", "-x", "16", "-s", "16", "-k", "50M", 
-                    "--file-allocation=none", "--disable-ipv6=true", 
-                    "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn
-                ]
-                if furl == test_url and is_hf and current_token: cmd.append(f"--header=Authorization: Bearer {current_token}")
-                cmd.append(furl)
-                
-                try:
-                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                    for line in p.stdout:
-                        if line.startswith("[#"):
-                            pct_m = re.search(r'\((\d+)%\)', line)
-                            speed_m = re.search(r'DL:([^\s]+)', line)
-                            eta_m = re.search(r'ETA:([^\s\]]+)', line)
-                            size_m = re.search(r'([^\s]+)/([^\s\(]+)\(', line)
-                            
-                            pct = float(pct_m.group(1)) if pct_m else 0.0
-                            speed = speed_m.group(1) if speed_m else "..."
-                            eta = eta_m.group(1) if eta_m else "..."
-                            curr_size = size_m.group(1) if size_m else ""
-                            tot_size = size_m.group(2) if size_m else ""
-                            
-                            ui.update_progress(pct, speed, eta, file_size=tot_size, current_size=curr_size)
-                            
-                    p.wait()
-                    if p.returncode == 0:
-                        download_success = True
-                        break
-                    else:
+                parsed_url = test_url.split('?')[0]
+                hf_match = re.search(r'huggingface\.co/(?:(datasets|spaces)/)?([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/(.*)', parsed_url) if is_hf else None
+
+                if hf_match:
+                    prefix = hf_match.group(1)
+                    repo_type = prefix[:-1] if prefix else "model"
+                    repo_id = hf_match.group(2)
+                    revision = hf_match.group(3)
+                    repo_filename = hf_match.group(4)
+                    
+                    env = os.environ.copy()
+                    env["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+                    
+                    cmd = [
+                        "huggingface-cli", "download", repo_id, repo_filename, 
+                        "--repo-type", repo_type, 
+                        "--revision", revision, 
+                        "--local-dir", folder, 
+                        "--local-dir-use-symlinks", "False"
+                    ]
+                    if current_token:
+                        cmd.extend(["--token", current_token])
+                        
+                    try:
+                        import sys
+                        cli_path = shutil.which("huggingface-cli")
+                        if not cli_path: cmd[0] = f"{os.path.dirname(sys.executable)}/huggingface-cli"
+                        
+                        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+                        buffer = bytearray()
+                        while True:
+                            char = p.stdout.read(1)
+                            if not char: break
+                            if char == b'\r' or char == b'\n':
+                                line = buffer.decode('utf-8', errors='replace').strip()
+                                buffer.clear()
+                                if line:
+                                    pct_m = re.search(r'(\d{1,3})%', line)
+                                    size_m = re.search(r'([0-9.]+[a-zA-Z]*)\s*/\s*([0-9.]+[a-zA-Z]*)', line)
+                                    speed_m = re.search(r'([0-9.]+[a-zA-Z]*/s)', line)
+                                    eta_m = re.search(r'<([^,\]]+)', line)
+                                    
+                                    if pct_m or size_m:
+                                        pct = float(pct_m.group(1)) if pct_m else ui.pct
+                                        curr_size = size_m.group(1) if size_m else ui.current_size
+                                        tot_size = size_m.group(2) if size_m else ui.file_size
+                                        speed = speed_m.group(1) if speed_m else ui.speed
+                                        eta = eta_m.group(1) if eta_m else ui.eta
+                                        ui.update_progress(pct, speed, eta, file_size=tot_size, current_size=curr_size)
+                            else:
+                                buffer.extend(char)
+                        p.wait()
+                        
+                        expected_path = os.path.join(folder, repo_filename)
+                        if p.returncode == 0 and os.path.exists(expected_path):
+                            # Move file if repo_filename specifies a subfolder differently than our expected legacy flatten structure
+                            final_path = os.path.join(folder, fn)
+                            if expected_path != final_path:
+                                os.makedirs(os.path.dirname(final_path), exist_ok=True)
+                                shutil.move(expected_path, final_path)
+                                if '/' in repo_filename:
+                                    try: os.removedirs(os.path.dirname(expected_path))
+                                    except: pass
+                            download_success = True
+                            break
+                        else:
+                            if attempt == len(tokens_to_try):
+                                ui.add_error(fn, "HF Download failed", p.returncode)
+                    except Exception as e:
                         if attempt == len(tokens_to_try):
-                            ui.add_error(fn, "Download failed", p.returncode)
-                except Exception as e:
-                    if attempt == len(tokens_to_try):
-                        ui.add_error(fn, f"System error: {str(e)}")
+                            ui.add_error(fn, f"HF System error: {str(e)}")
+                            
+                else:
+                    cmd = [
+                        "aria2c", "--console-log-level=error", "--summary-interval=1", 
+                        "-c", "-x", "16", "-s", "16", "-k", "50M", 
+                        "--file-allocation=none", "--disable-ipv6=true", 
+                        "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn
+                    ]
+                    if furl == test_url and is_hf and current_token: cmd.append(f"--header=Authorization: Bearer {current_token}")
+                    cmd.append(furl)
+                    
+                    try:
+                        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                        for line in p.stdout:
+                            if line.startswith("[#"):
+                                pct_m = re.search(r'\((\d+)%\)', line)
+                                speed_m = re.search(r'DL:([^\s]+)', line)
+                                eta_m = re.search(r'ETA:([^\s\]]+)', line)
+                                size_m = re.search(r'([^\s]+)/([^\s\(]+)\(', line)
+                                
+                                pct = float(pct_m.group(1)) if pct_m else 0.0
+                                speed = speed_m.group(1) if speed_m else "..."
+                                eta = eta_m.group(1) if eta_m else "..."
+                                curr_size = size_m.group(1) if size_m else ""
+                                tot_size = size_m.group(2) if size_m else ""
+                                
+                                ui.update_progress(pct, speed, eta, file_size=tot_size, current_size=curr_size)
+                                
+                        p.wait()
+                        if p.returncode == 0:
+                            download_success = True
+                            break
+                        else:
+                            if attempt == len(tokens_to_try):
+                                ui.add_error(fn, "Download failed", p.returncode)
+                    except Exception as e:
+                        if attempt == len(tokens_to_try):
+                            ui.add_error(fn, f"System error: {str(e)}")
             
             # ZIP Extraction Logic
             if download_success and fn and fn.lower().endswith('.zip'):
