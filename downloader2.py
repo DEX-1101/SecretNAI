@@ -368,9 +368,9 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
     hf_needs_opt = any("huggingface.co" in link.lower() for links in DOWNLOAD_BATCHES.values() for link in links)
     if hf_needs_opt:
-        ui.update_status("Initializing Xet & HF-Transfer...")
+        ui.update_status("Initializing HF-Transfer...")
         import sys
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "hf-transfer", "hf-xet", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "hf-transfer", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
     civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
@@ -479,11 +479,12 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 hf_match = re.search(r'huggingface\.co/(?:(datasets|spaces)/)?([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/(.*)', parsed_url) if is_hf else None
 
                 if hf_match:
+                    import urllib.parse
                     prefix = hf_match.group(1)
                     repo_type = prefix[:-1] if prefix else "model"
                     repo_id = hf_match.group(2)
                     revision = hf_match.group(3)
-                    repo_filename = hf_match.group(4)
+                    repo_filename = urllib.parse.unquote(hf_match.group(4))
                     
                     env = os.environ.copy()
                     env["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -492,8 +493,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         "huggingface-cli", "download", repo_id, repo_filename, 
                         "--repo-type", repo_type, 
                         "--revision", revision, 
-                        "--local-dir", folder, 
-                        "--local-dir-use-symlinks", "False"
+                        "--local-dir", folder
                     ]
                     if current_token:
                         cmd.extend(["--token", current_token])
@@ -505,6 +505,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         
                         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
                         buffer = bytearray()
+                        error_log = []
                         while True:
                             char = p.stdout.read(1)
                             if not char: break
@@ -512,6 +513,10 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                                 line = buffer.decode('utf-8', errors='replace').strip()
                                 buffer.clear()
                                 if line:
+                                    error_log.append(line)
+                                    # Keep the last 5 lines for error reporting
+                                    if len(error_log) > 5: error_log.pop(0)
+                                    
                                     pct_m = re.search(r'(\d{1,3})%', line)
                                     size_m = re.search(r'([0-9.]+[a-zA-Z]*)\s*/\s*([0-9.]+[a-zA-Z]*)', line)
                                     speed_m = re.search(r'([0-9.]+[a-zA-Z]*/s)', line)
@@ -542,7 +547,8 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                             break
                         else:
                             if attempt == len(tokens_to_try):
-                                ui.add_error(fn, "HF Download failed", p.returncode)
+                                err_msg = " ".join(error_log[-2:]) if error_log else "Unknown CLI Error"
+                                ui.add_error(fn, f"HF DL Failed: {err_msg[:120]}", p.returncode)
                     except Exception as e:
                         if attempt == len(tokens_to_try):
                             ui.add_error(fn, f"HF System error: {str(e)}")
