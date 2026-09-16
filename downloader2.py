@@ -370,7 +370,8 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
     if hf_needs_opt:
         ui.update_status("Initializing HF-Transfer...")
         import sys
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "hf-transfer", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Forced Upgrade (-U) ensures the CLI supports the 'download' subcommand
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "hf-transfer", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
     civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
@@ -478,6 +479,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                 parsed_url = test_url.split('?')[0]
                 hf_match = re.search(r'huggingface\.co/(?:(datasets|spaces)/)?([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/(.*)', parsed_url) if is_hf else None
 
+                cli_success = False
                 if hf_match:
                     import urllib.parse
                     prefix = hf_match.group(1)
@@ -505,7 +507,6 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         
                         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
                         buffer = bytearray()
-                        error_log = []
                         while True:
                             char = p.stdout.read(1)
                             if not char: break
@@ -513,10 +514,6 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                                 line = buffer.decode('utf-8', errors='replace').strip()
                                 buffer.clear()
                                 if line:
-                                    error_log.append(line)
-                                    # Keep the last 5 lines for error reporting
-                                    if len(error_log) > 5: error_log.pop(0)
-                                    
                                     pct_m = re.search(r'(\d{1,3})%', line)
                                     size_m = re.search(r'([0-9.]+[a-zA-Z]*)\s*/\s*([0-9.]+[a-zA-Z]*)', line)
                                     speed_m = re.search(r'([0-9.]+[a-zA-Z]*/s)', line)
@@ -544,16 +541,13 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                                     try: os.removedirs(os.path.dirname(expected_path))
                                     except: pass
                             download_success = True
-                            break
-                        else:
-                            if attempt == len(tokens_to_try):
-                                err_msg = " ".join(error_log[-2:]) if error_log else "Unknown CLI Error"
-                                ui.add_error(fn, f"HF DL Failed: {err_msg[:120]}", p.returncode)
-                    except Exception as e:
-                        if attempt == len(tokens_to_try):
-                            ui.add_error(fn, f"HF System error: {str(e)}")
-                            
-                else:
+                            cli_success = True
+                            break # Exits attempt loop
+                    except Exception:
+                        pass # Silently bypass to aria2c fallback
+                        
+                if not cli_success:
+                    # FALLBACK: Use aria2c if HF-Transfer fails or url is non-HF
                     cmd = [
                         "aria2c", "--console-log-level=error", "--summary-interval=1", 
                         "-c", "-x", "16", "-s", "16", "-k", "50M", 
@@ -586,7 +580,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                             break
                         else:
                             if attempt == len(tokens_to_try):
-                                ui.add_error(fn, "Download failed", p.returncode)
+                                ui.add_error(fn, "Aria2c Download failed", p.returncode)
                     except Exception as e:
                         if attempt == len(tokens_to_try):
                             ui.add_error(fn, f"System error: {str(e)}")
