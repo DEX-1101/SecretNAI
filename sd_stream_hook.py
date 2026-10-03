@@ -16,7 +16,9 @@ decrypt, so what the app receives is the real picture, not the pixel-shuffled fi
 """
 
 import io
+import json
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -38,7 +40,55 @@ _counter = _boot
 _items: "OrderedDict[int, dict]" = OrderedDict()
 
 
-def _to_png(path, fallback_image, fallback_info):
+_AD_PROMPT = re.compile(r'ADetailer prompt: ("(?:\\.|[^\\"])*"|[^,]*)')
+
+
+def _words(t):
+    t = re.sub(r"<[^>]*>", " ", t or "")
+    return set(re.findall(r"[a-z0-9_']+", t.lower()))
+
+
+def _fix_adetailer_prompt(info, p):
+    """ADetailer overwrites p.all_prompts, which is what gets written into the saved file, so the file's
+    main prompt ends up being the ADetailer prompt. p.main_prompt / p.main_negative_prompt still hold the
+    real ones (that is what the WebUI shows under the image), so put them back."""
+    try:
+        text = info.get("parameters")
+        if not isinstance(text, str) or "ADetailer prompt:" not in text:
+            return
+        main = getattr(p, "main_prompt", None)
+        main_neg = getattr(p, "main_negative_prompt", None)
+        if not isinstance(main, str) or not main.strip():
+            print("[sd_stream_hook] ADetailer image but p.main_prompt is unavailable - prompt not restored")
+            return
+        lines = text.strip().split("\n")
+        params = lines[-1]
+        m = _AD_PROMPT.search(params)
+        if not m:
+            return
+        ad = m.group(1).strip()
+        if ad.startswith('"'):
+            try:
+                ad = json.loads(ad)
+            except Exception:
+                pass
+        body = lines[:-1]
+        cut = next((i for i, l in enumerate(body) if l.startswith("Negative prompt:")), len(body))
+        cur_prompt = "\n".join(body[:cut])
+        w_cur, w_ad = _words(cur_prompt), _words(ad)
+        if not w_cur or len(w_cur & w_ad) / len(w_cur) < 0.9:
+            return  # main prompt is not just the ADetailer prompt -> nothing to fix
+        out = main.strip()
+        neg = main_neg if isinstance(main_neg, str) and main_neg.strip() else "\n".join(body[cut:])[16:]
+        if neg.strip():
+            out += "\nNegative prompt: " + neg.strip()
+        info["parameters"] = out + "\n" + params
+        print("[sd_stream_hook] restored main prompt overwritten by ADetailer")
+    except Exception as ex:
+        print(f"[sd_stream_hook] ADetailer prompt fix failed: {ex}")
+
+
+def _to_png(path, fallback_image, fallback_info, p=None):
     """Return PNG bytes (with generation info) of the saved image, decrypted."""
     img, info = None, {}
     try:
@@ -53,6 +103,7 @@ def _to_png(path, fallback_image, fallback_info):
         img, info = fallback_image, dict(fallback_info or {})
     for k, v in (fallback_info or {}).items():  # e.g. infotext missing from a jpg/webp file
         info.setdefault(k, v)
+    _fix_adetailer_prompt(info, p)
     png = PngImagePlugin.PngInfo()
     for k, v in info.items():
         if isinstance(v, str) and v and k not in DROP_KEYS:
@@ -69,7 +120,7 @@ def _on_image_saved(params):
         stem = os.path.splitext(name)[0]
         if name.startswith("grid-") or stem.endswith(SKIP_SUFFIXES):
             return  # only final result images, no grids / intermediate saves
-        data = _to_png(params.filename, params.image, getattr(params, "pnginfo", None))
+        data = _to_png(params.filename, params.image, getattr(params, "pnginfo", None), getattr(params, "p", None))
         with _lock:
             _counter += 1
             _items[_counter] = {"name": name, "ts": time.time(), "data": data}
