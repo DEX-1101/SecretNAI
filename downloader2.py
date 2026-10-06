@@ -26,6 +26,13 @@ except ImportError:
     print("⚠️ Warning: IPython not found. UI requires a Jupyter/Colab-like environment.")
 
 VAR_REGEX = re.compile(r'\{([^}]+)\}')
+_UNIT_SPACE_RE = re.compile(r'([0-9.]+)([a-zA-Z]+)')
+
+def _pretty_units(text):
+    """MiB->MB etc. and put a space between number and unit (e.g. '12.5MB/s' -> '12.5 MB/s')."""
+    if not text: return ""
+    text = text.replace("MiB", "MB").replace("KiB", "KB").replace("GiB", "GB")
+    return _UNIT_SPACE_RE.sub(r'\1 \2', text)
 def resolve_vars(text):
     return VAR_REGEX.sub(lambda m: str(user_ns.get(m.group(1), m.group(0))), text)
 
@@ -80,9 +87,12 @@ class DownloaderUI:
         self.errors = []
         self.is_finished = False
         self.last_update = 0
-        self.update_interval = 0.2
+        self.update_interval = 0.5  # aria2 reports 1x/sec anyway; fewer notebook round-trips
         self.token_info = ""
         self._displayed = False
+        self._last_html = None   # skip re-sending identical frames
+        self._hist_tags = []     # cached HTML for finished files (built once each)
+        self._err_items = []     # cached HTML for errors (built once each)
 
         if self.is_notebook:
             self._render()
@@ -152,8 +162,8 @@ class DownloaderUI:
 
         hist_html = ""
         if self.history:
-            tags = []
-            for name, st in self.history:
+            tags = self._hist_tags
+            for name, st in self.history[len(tags):]:
                 if st in ['success', 'skipped']:
                     tags.append(f'<span style="background:#1e1e1e; border:1px solid #2a2a2a; padding:3px 8px; border-radius:4px; color:#e2e2e2;"><span style="color:#4ade80; font-weight:900;">✓</span> {html.escape(name)}</span>')
                 else:
@@ -168,17 +178,10 @@ class DownloaderUI:
 
         pb_html = ""
         if not self.is_finished and self.current_file:
-            display_speed = self.speed.replace("MiB", "MB").replace("KiB", "KB").replace("GiB", "GB")
-            display_speed = re.sub(r'([0-9.]+)([a-zA-Z]+)', r'\1 \2', display_speed)
-            
-            display_size = self.file_size.replace("MiB", "MB").replace("KiB", "KB").replace("GiB", "GB") if self.file_size else ""
-            if display_size:
-                display_size = re.sub(r'([0-9.]+)([a-zA-Z]+)', r'\1 \2', display_size)
-                
-            display_current = self.current_size.replace("MiB", "MB").replace("KiB", "KB").replace("GiB", "GB") if hasattr(self, 'current_size') and self.current_size else ""
-            if display_current:
-                display_current = re.sub(r'([0-9.]+)([a-zA-Z]+)', r'\1 \2', display_current)
-                
+            display_speed = _pretty_units(self.speed)
+            display_size = _pretty_units(self.file_size)
+            display_current = _pretty_units(self.current_size)
+
             if display_current and display_size:
                 progress_text = f"{display_current} / {display_size}"
             else:
@@ -200,7 +203,7 @@ class DownloaderUI:
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
                 <div style="background: #2d2d2d; height: 4px; width: 100%; border-radius: 0; overflow:hidden;">
-                    <div style="background: #4ade80; height: 100%; width: {self.pct}%; transition: width 0.3s linear;"></div>
+                    <div style="background: #4ade80; height: 100%; width: {self.pct}%; transition: width 0.5s linear;"></div>
                 </div>
                 <div style="font-size: 11px; font-weight: 600; color: #4ade80; min-width: 110px; text-align: right; white-space: nowrap; flex-shrink: 0;">
                     {progress_text}
@@ -221,8 +224,8 @@ class DownloaderUI:
 
         err_html = ""
         if self.errors:
-            err_items = []
-            for err in self.errors:
+            err_items = self._err_items
+            for err in self.errors[len(err_items):]:
                 code_str = f" <span style='opacity: 0.7;'>(Code: {err['code']})</span>" if err['code'] is not None else ""
                 err_items.append(
                     f"<div style='margin-bottom: 6px; display: flex; align-items: start; gap: 8px;'>"
@@ -252,6 +255,9 @@ class DownloaderUI:
         """
 
         if self.is_notebook:
+            if html_content == self._last_html:
+                return
+            self._last_html = html_content
             if not self._displayed:
                 display(HTML(html_content), display_id=self.display_id)
                 self._displayed = True
