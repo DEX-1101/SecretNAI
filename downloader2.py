@@ -368,10 +368,16 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
     hf_needs_opt = any("huggingface.co" in link.lower() for links in DOWNLOAD_BATCHES.values() for link in links)
     if hf_needs_opt:
-        ui.update_status("Initializing HF-Transfer...")
         import sys
-        # Forced Upgrade (-U) ensures the CLI supports the 'download' subcommand
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "hf-transfer", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import importlib.util
+        # Skip the slow pip step when a modern HF stack (Xet backend + CLI) is already installed
+        hf_ready = importlib.util.find_spec("hf_xet") is not None and bool(shutil.which("hf") or shutil.which("huggingface-cli"))
+        if not hf_ready:
+            ui.update_status("Initializing HF-Transfer...")
+            # Forced Upgrade (-U) ensures the CLI supports the 'download' subcommand
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "hf-transfer", "huggingface_hub"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Xet backend = fastest HF downloader. Separate call so a missing wheel can never break the install above
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "hf-xet"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     hf_tokens = [t.strip() for t in hf_token.split("::") if t.strip()]
     civitai_tokens = [t.strip() for t in civitai_token.split("::") if t.strip()]
@@ -490,6 +496,7 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     
                     env = os.environ.copy()
                     env["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+                    env["HF_XET_HIGH_PERFORMANCE"] = "1"  # Xet: max concurrency + bandwidth for big files
                     
                     cmd = [
                         "huggingface-cli", "download", repo_id, repo_filename, 
@@ -502,8 +509,15 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                         
                     try:
                         import sys
-                        cli_path = shutil.which("huggingface-cli")
-                        if not cli_path: cmd[0] = f"{os.path.dirname(sys.executable)}/huggingface-cli"
+                        # Prefer the modern 'hf' CLI, fall back to legacy 'huggingface-cli'
+                        cli_path = shutil.which("hf") or shutil.which("huggingface-cli")
+                        if not cli_path:
+                            for _name in ("hf", "huggingface-cli"):
+                                _alt = os.path.join(os.path.dirname(sys.executable), _name)
+                                if os.path.exists(_alt):
+                                    cli_path = _alt
+                                    break
+                        cmd[0] = cli_path or f"{os.path.dirname(sys.executable)}/huggingface-cli"
                         
                         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
                         buffer = bytearray()
@@ -550,8 +564,10 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
                     # FALLBACK: Use aria2c if HF-Transfer fails or url is non-HF
                     cmd = [
                         "aria2c", "--console-log-level=error", "--summary-interval=1", 
-                        "-c", "-x", "16", "-s", "16", "-k", "50M", 
+                        "-c", "-x", "16", "-s", "16", "-k", "1M", 
                         "--file-allocation=none", "--disable-ipv6=true", 
+                        "--disk-cache=64M", "--async-dns=false", 
+                        "--retry-wait=2", "--connect-timeout=15", 
                         "--header=User-Agent: Mozilla/5.0", "-d", folder, "-o", fn
                     ]
                     if furl == test_url and is_hf and current_token: cmd.append(f"--header=Authorization: Bearer {current_token}")
