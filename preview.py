@@ -340,7 +340,8 @@ _CSS = """<style>
 .mw{--accent:#60cdff;--ok:#6ccb5f;--warn:#fce100;--bad:#ff99a4;--onaccent:#003a52;
  font-family:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
  font-size:13px;line-height:1.35;color:var(--text);background:var(--bg);border:1px solid var(--stroke);
- border-radius:10px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.25);margin:6px 0;box-sizing:border-box}
+ border-radius:10px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.25);margin:6px 0;box-sizing:border-box;
+ width:100%;min-width:min(960px,calc(100vw - 56px))}
 .mw *{box-sizing:border-box}
 .mw.dark{--bg:#202020;--bar:#2b2b2b;--card:rgba(255,255,255,.055);--well:rgba(0,0,0,.28);--stroke:rgba(255,255,255,.08);
  --text:#fff;--text2:rgba(255,255,255,.72);--text3:rgba(255,255,255,.46);--track:rgba(255,255,255,.12);--hover:rgba(255,255,255,.08)}
@@ -714,9 +715,11 @@ class PreviewMonitor:
                     _co.enable_custom_widget_manager()
                 except Exception:
                     pass
-                self._wst = _w.HTML(_CSS + self._stats_html())
-                self._wgal = _w.HTML(_CSS + self._gallery_html(force=True))
-                display(_w.VBox([self._wst, self._wgal]))
+                full = lambda: _w.Layout(width="100%", max_width="100%", min_width="0", flex="1 1 auto")
+                self._wst = _w.HTML(_CSS + self._stats_html(), layout=full())
+                self._wgal = _w.HTML(_CSS + self._gallery_html(force=True), layout=full())
+                display(_w.VBox([self._wst, self._wgal],
+                                layout=_w.Layout(width="100%", max_width="100%", align_items="stretch")))
                 return
             except Exception:
                 self._wst = self._wgal = None  # fall back to update_display
