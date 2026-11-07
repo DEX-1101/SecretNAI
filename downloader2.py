@@ -710,6 +710,319 @@ def start_colab_dl(dl_text, hf_token, civitai_token, req, zip_pwd, upload_to):
 
     ui.finish()
 
+# ==========================================
+# File Manager (browse / select / delete)
+# Usage:  FileManager()            or   %files [path]
+# ==========================================
+try:
+    import ipywidgets as W
+    _HAS_WIDGETS = True
+except ImportError:
+    _HAS_WIDGETS = False
+
+# Folders that can never be deleted from the UI.
+PROTECTED = {
+    "/", "/kaggle", "/kaggle/working", "/kaggle/input", "/content",
+    "/content/drive", "/content/drive/MyDrive", "/home", "/root", "/tmp",
+}
+
+_CSS = """
+<style>
+.fm-btn {
+  border-radius: 6px !important; padding: 0 12px !important; min-width: 0 !important;
+  height: 32px !important; line-height: 32px !important; box-shadow: none !important;
+  white-space: nowrap !important; flex: 0 0 auto !important;
+}
+.fm-name {
+  display: flex !important; align-items: center !important; justify-content: flex-start !important;
+  text-align: left !important; background: transparent !important; border: none !important;
+  box-shadow: none !important; height: 30px !important; line-height: 30px !important;
+  padding: 0 6px !important; overflow: hidden !important; white-space: nowrap !important;
+  text-overflow: ellipsis !important; cursor: pointer;
+}
+.fm-name, .fm-name i, .fm-name .fa, .fm-name span { color: inherit !important; }
+.fm-name:hover { background: rgba(128,128,128,.28) !important; }
+.fm-name i { margin-right: 8px !important; }
+.fm-row, .fm-cell, .fm-cell span { color: inherit !important; }
+.fm-list { display: flex !important; flex-direction: column !important; }
+.fm-row { flex: 0 0 auto !important; height: 30px !important; min-height: 30px !important; align-items: center !important; }
+.fm-row:hover { background: rgba(128,128,128,.14); }
+.fm-cell { line-height: 30px !important; height: 30px !important; white-space: nowrap !important;
+  overflow: hidden !important; text-overflow: ellipsis !important; }
+</style>
+"""
+
+
+def _fmt_size(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _fmt_time(ts):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+def _default_start():
+    for p in ("/kaggle/working", "/content"):
+        if os.path.isdir(p):
+            return p
+    return os.getcwd()
+
+
+def _btn(**kw):
+    b = W.Button(**kw)
+    b.add_class("fm-btn")
+    return b
+
+
+class FileManager:
+    def __init__(self, start=None):
+        if not _HAS_WIDGETS:
+            print("⚠️ ipywidgets is required for the file manager (pip install ipywidgets).")
+            return
+        self.cwd = os.path.abspath(os.path.expanduser(start)) if start else _default_start()
+        self.home = self.cwd
+        self.selected = set()
+        self._row_checks = []
+        self._lock = False
+
+        # ---- top bar ----
+        self.btn_up = _btn(icon="arrow-up", tooltip="Parent folder", layout=W.Layout(width="44px"))
+        self.btn_home = _btn(icon="home", tooltip="Back to start folder", layout=W.Layout(width="44px"))
+        self.btn_refresh = _btn(icon="refresh", tooltip="Refresh", layout=W.Layout(width="44px"))
+        self.path_box = W.Text(layout=W.Layout(flex="1 1 200px", min_width="150px"),
+                               placeholder="Type a path and press Go")
+        self.btn_go = _btn(description="Go", layout=W.Layout(width="70px"))
+
+        shortcuts = [p for p in ("/kaggle/working", "/kaggle/input", "/content",
+                                 "/content/drive/MyDrive", os.path.expanduser("~"), "/tmp")
+                     if os.path.isdir(p)]
+        self.jump = W.Dropdown(options=[("Jump to…", "")] + [(p, p) for p in shortcuts],
+                               value="", layout=W.Layout(width="190px"))
+
+        # ---- options bar ----
+        self.cb_all = W.Checkbox(description="Select all", indent=False, layout=W.Layout(width="120px"))
+        self.cb_hidden = W.Checkbox(description="Show hidden", indent=False, layout=W.Layout(width="130px"))
+        self.sort = W.Dropdown(options=[("Name", "name"), ("Size", "size"), ("Modified", "mtime")],
+                               value="name", description="Sort:", layout=W.Layout(width="180px"))
+
+        # ---- list + bottom ----
+        self.listing = W.VBox(layout=W.Layout(max_height="440px", overflow_y="auto", overflow_x="hidden",
+                                              width="100%", border="1px solid #8885", padding="4px"))
+        self.listing.add_class("fm-list")
+        self.btn_delete = _btn(description="Delete selected", icon="trash", button_style="danger",
+                               disabled=True, layout=W.Layout(width="auto", min_width="200px"))
+        self.status = W.HTML(layout=W.Layout(margin="0 0 0 12px"))
+        self.confirm_msg = W.HTML()
+        self.btn_yes = _btn(description="Yes, delete", button_style="danger", icon="check",
+                            layout=W.Layout(width="auto", min_width="140px"))
+        self.btn_no = _btn(description="Cancel", icon="times",
+                           layout=W.Layout(width="auto", min_width="110px"))
+        self.confirm_box = W.VBox([self.confirm_msg,
+                                   W.HBox([self.btn_yes, self.btn_no], layout=W.Layout(gap="8px"))],
+                                  layout=W.Layout(display="none", border="1px solid #d33",
+                                                  padding="8px", margin="8px 0"))
+
+        # ---- events ----
+        self.btn_up.on_click(lambda _: self.go(os.path.dirname(self.cwd)))
+        self.btn_home.on_click(lambda _: self.go(self.home))
+        self.btn_refresh.on_click(lambda _: self.refresh())
+        self.btn_go.on_click(lambda _: self.go(self.path_box.value))
+        self.jump.observe(self._on_jump, names="value")
+        self.cb_all.observe(self._on_select_all, names="value")
+        self.cb_hidden.observe(lambda c: self.refresh(), names="value")
+        self.sort.observe(lambda c: self.refresh(), names="value")
+        self.btn_delete.on_click(self._ask_confirm)
+        self.btn_yes.on_click(self._do_delete)
+        self.btn_no.on_click(self._cancel_confirm)
+
+        gap = W.Layout(gap="8px", align_items="center")
+        self.ui = W.VBox([
+            W.HBox([self.btn_up, self.btn_home, self.btn_refresh, self.path_box,
+                    self.btn_go, self.jump], layout=gap),
+            W.HBox([self.cb_all, self.cb_hidden, self.sort],
+                   layout=W.Layout(gap="12px", align_items="center", margin="6px 0")),
+            self.listing,
+            W.HBox([self.btn_delete, self.status],
+                   layout=W.Layout(align_items="center", margin="8px 0")),
+            self.confirm_box,
+        ])
+        self.refresh()
+        display(HTML(_CSS))
+        display(self.ui)
+
+    # ---------------- navigation
+    def go(self, path):
+        path = os.path.abspath(os.path.expanduser(path.strip() or "/"))
+        if not os.path.isdir(path):
+            self._msg(f"Not a folder: {html.escape(path)}", "red")
+            return
+        self.cwd = path
+        self.selected.clear()
+        self._cancel_confirm()
+        self.refresh()
+
+    def _on_jump(self, change):
+        if change["new"]:
+            self.go(change["new"])
+            self.jump.value = ""
+
+    # ---------------- listing
+    def _scan(self):
+        items = []
+        try:
+            with os.scandir(self.cwd) as it:
+                for e in it:
+                    if not self.cb_hidden.value and e.name.startswith("."):
+                        continue
+                    try:
+                        st = e.stat(follow_symlinks=False)
+                        is_dir = e.is_dir()
+                    except OSError:
+                        continue
+                    items.append({"name": e.name, "path": e.path, "is_dir": is_dir,
+                                  "link": e.is_symlink(), "size": st.st_size, "mtime": st.st_mtime})
+        except PermissionError:
+            self._msg("Permission denied for this folder.", "red")
+        key = self.sort.value
+        rev = key != "name"
+        items.sort(key=lambda x: (x["name"].lower() if key == "name" else x[key]), reverse=rev)
+        items.sort(key=lambda x: not x["is_dir"])  # folders first (stable)
+        return items
+
+    def _make_row(self, it):
+        cb = W.Checkbox(value=it["path"] in self.selected, indent=False,
+                        layout=W.Layout(width="30px", min_width="30px", flex="0 0 auto"))
+        cb.observe(lambda c, p=it["path"]: self._on_check(p, c["new"]), names="value")
+        self._row_checks.append(cb)
+
+        name_layout = W.Layout(flex="1 1 280px", min_width="160px")
+        if it["is_dir"]:
+            label = it["name"] + ("/ →" if it["link"] else "/")
+            name = W.Button(description=label, icon="folder", tooltip="Open folder", layout=name_layout)
+            name.add_class("fm-name")
+            name.on_click(lambda _, p=it["path"]: self.go(p))
+            try:
+                count = len(os.listdir(it["path"]))
+                size_txt = f"{count} item{'s' if count != 1 else ''}"
+            except OSError:
+                size_txt = "—"
+        else:
+            name = W.HTML(f"<span style='padding-left:6px'>📄&nbsp;&nbsp;{html.escape(it['name'])}</span>",
+                          layout=name_layout)
+            name.add_class("fm-cell")
+            size_txt = _fmt_size(it["size"])
+
+        size = W.HTML(f"<span style='opacity:.7'>{size_txt}</span>",
+                      layout=W.Layout(width="90px", min_width="90px", flex="0 0 auto"))
+        size.add_class("fm-cell")
+        mod = W.HTML(f"<span style='opacity:.7'>{_fmt_time(it['mtime'])}</span>",
+                     layout=W.Layout(width="140px", min_width="140px", flex="0 0 auto"))
+        mod.add_class("fm-cell")
+        row = W.HBox([cb, name, size, mod],
+                     layout=W.Layout(width="100%", flex="0 0 auto", height="30px", align_items="center"))
+        row.add_class("fm-row")
+        return row
+
+    def refresh(self):
+        self._lock = True
+        self._row_checks = []
+        self.cb_all.value = False
+        self._lock = False
+        self.path_box.value = self.cwd
+        items = self._scan()
+        rows = [self._make_row(it) for it in items]
+        if not rows:
+            rows = [W.HTML("<i style='opacity:.6'>Empty folder</i>")]
+        self.listing.children = rows
+        self._update_buttons()
+        if not self.status.value.startswith("<span style='color:red"):
+            self._msg(f"{len(items)} item(s)")
+
+    # ---------------- selection
+    def _on_check(self, path, value):
+        (self.selected.add if value else self.selected.discard)(path)
+        self._update_buttons()
+
+    def _on_select_all(self, change):
+        if self._lock:
+            return
+        for cb in self._row_checks:
+            cb.value = change["new"]
+
+    def _update_buttons(self):
+        n = len(self.selected)
+        self.btn_delete.disabled = n == 0
+        self.btn_delete.description = f"Delete selected ({n})" if n else "Delete selected"
+        if n:
+            self._msg(f"{n} selected")
+
+    # ---------------- deleting
+    def _ask_confirm(self, _):
+        names = [os.path.basename(p) or p for p in sorted(self.selected)]
+        shown = "".join(f"<li>{html.escape(n)}</li>" for n in names[:10])
+        more = f"<li>… and {len(names) - 10} more</li>" if len(names) > 10 else ""
+        warn = ""
+        if any(p.startswith("/content/drive") for p in self.selected):
+            warn = "<b style='color:#d33'>These are in Google Drive and will be removed from your Drive.</b><br>"
+        self.confirm_msg.value = (
+            f"<b>Permanently delete {len(names)} item(s)?</b> This cannot be undone.<br>"
+            f"{warn}<ul style='margin:4px 0'>{shown}{more}</ul>"
+        )
+        self.confirm_box.layout.display = "flex"
+        self.btn_delete.disabled = True
+
+    def _cancel_confirm(self, _=None):
+        self.confirm_box.layout.display = "none"
+        self.btn_delete.disabled = not self.selected
+
+    def _do_delete(self, _):
+        ok, errors = 0, []
+        for p in sorted(self.selected):
+            try:
+                if os.path.abspath(p) in PROTECTED:
+                    raise PermissionError("protected folder")
+                if os.path.islink(p) or os.path.isfile(p):
+                    os.remove(p)
+                else:
+                    shutil.rmtree(p)
+                ok += 1
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{os.path.basename(p)}: {e}")
+        self.selected.clear()
+        self.confirm_box.layout.display = "none"
+        self.refresh()
+        if errors:
+            self._msg(f"Deleted {ok}. Failed: " + "; ".join(html.escape(e) for e in errors), "red")
+        else:
+            self._msg(f"Deleted {ok} item(s).", "green")
+
+    def _msg(self, text, color=None):
+        style = f"color:{color}" if color else "opacity:.8"
+        self.status.value = f"<span style='{style}'>{text}</span>"
+
+
+# Make FileManager callable from any notebook cell after running this script
+user_ns["FileManager"] = FileManager
+
+# ==========================================
+# Register IPython Line Magic (%files [path])
+# ==========================================
+try:
+    from IPython.core.magic import register_line_magic
+
+    @register_line_magic
+    def files(line):
+        """Open the file manager. Usage: %files  or  %files /some/path"""
+        path = line.strip().strip('"\'') or None
+        FileManager(resolve_vars(path) if path else None)
+except Exception:
+    pass
+
+
 # Populate initial download list from Colab notebook variables
 init_dl_list = user_ns.get('DOWNLOAD_LIST', '')
 if not init_dl_list:
